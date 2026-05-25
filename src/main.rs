@@ -2602,6 +2602,177 @@ printf 'signed shortcut bytes' > "$out"
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn expired_download_stops_and_repost_refreshes_same_id() {
+        let root = test_temp_dir("shortcut-forge-expiry-renewal");
+        let storage = root.join("data");
+        fs::create_dir_all(&storage).unwrap();
+        let (cherri, shortcuts) = install_fake_tools(&root, "Cherri Compiler v2.3.0", "signed v1");
+        let state = make_test_state(&storage, &cherri, &shortcuts);
+        let source = "#define name Minimal\nshowNotification(\"ok\", \"x\")\n".to_string();
+
+        let first = build_or_renew(
+            BuildRequest {
+                name: "Minimal".to_string(),
+                source_format: "cherri".to_string(),
+                source: source.clone(),
+                sign_mode: "anyone".to_string(),
+                ttl_seconds: 120,
+            },
+            &state,
+        )
+        .unwrap();
+        let first_token = first.download_url.rsplit('/').next().unwrap().to_string();
+        let mut metadata = load_metadata(&storage, &first.id).unwrap().unwrap();
+        metadata.expires_at = now_unix() - 1;
+        for token in &mut metadata.download_tokens {
+            token.expires_at = metadata.expires_at;
+        }
+        save_metadata(&storage, &metadata).unwrap();
+
+        let expired_metadata = load_metadata(&storage, &first.id).unwrap().unwrap();
+        assert_eq!(expired_metadata.status_for_api(now_unix()), "expired");
+        assert!(
+            resolve_download(&storage, &sha256_hex(first_token.as_bytes()), now_unix())
+                .unwrap()
+                .is_none()
+        );
+
+        let renewed = build_or_renew(
+            BuildRequest {
+                name: "Minimal Renewed".to_string(),
+                source_format: "cherri".to_string(),
+                source,
+                sign_mode: "anyone".to_string(),
+                ttl_seconds: 240,
+            },
+            &state,
+        )
+        .unwrap();
+        let renewed_token = renewed.download_url.rsplit('/').next().unwrap().to_string();
+        assert_eq!(first.id, renewed.id);
+        assert_ne!(first.download_url, renewed.download_url);
+        let renewed_metadata = load_metadata(&storage, &renewed.id).unwrap().unwrap();
+        assert_eq!(renewed_metadata.status_for_api(now_unix()), "ready");
+        assert_eq!(renewed_metadata.download_tokens.len(), 1);
+        assert!(
+            resolve_download(&storage, &sha256_hex(renewed_token.as_bytes()), now_unix())
+                .unwrap()
+                .is_some()
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn toolchain_fingerprint_change_rebuilds_same_id() {
+        let root = test_temp_dir("shortcut-forge-toolchain-rebuild");
+        let storage = root.join("data");
+        fs::create_dir_all(&storage).unwrap();
+        let (cherri, shortcuts) = install_fake_tools(&root, "Cherri Compiler v2.3.0", "signed v1");
+        let state = make_test_state(&storage, &cherri, &shortcuts);
+        let source = "#define name Minimal\nshowNotification(\"ok\", \"x\")\n".to_string();
+
+        let first = build_or_renew(
+            BuildRequest {
+                name: "Minimal".to_string(),
+                source_format: "cherri".to_string(),
+                source: source.clone(),
+                sign_mode: "anyone".to_string(),
+                ttl_seconds: 120,
+            },
+            &state,
+        )
+        .unwrap();
+        let first_metadata = load_metadata(&storage, &first.id).unwrap().unwrap();
+        assert_eq!(
+            fs::read_to_string(artifact_path(&storage, &first.id)).unwrap(),
+            "signed v1"
+        );
+
+        install_fake_tools(&root, "Cherri Compiler v2.4.0", "signed v2");
+        let second = build_or_renew(
+            BuildRequest {
+                name: "Minimal".to_string(),
+                source_format: "cherri".to_string(),
+                source,
+                sign_mode: "anyone".to_string(),
+                ttl_seconds: 240,
+            },
+            &state,
+        )
+        .unwrap();
+        let second_metadata = load_metadata(&storage, &second.id).unwrap().unwrap();
+        assert_eq!(first.id, second.id);
+        assert_ne!(
+            first_metadata.toolchain.fingerprint,
+            second_metadata.toolchain.fingerprint
+        );
+        assert_eq!(
+            fs::read_to_string(artifact_path(&storage, &second.id)).unwrap(),
+            "signed v2"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn gc_removes_expired_build_directories() {
+        let root = test_temp_dir("shortcut-forge-gc");
+        let storage = root.join("data");
+        fs::create_dir_all(&storage).unwrap();
+        let (cherri, shortcuts) = install_fake_tools(&root, "Cherri Compiler v2.3.0", "signed v1");
+        {
+            let state = make_test_state(&storage, &cherri, &shortcuts);
+            let built = build_or_renew(
+                BuildRequest {
+                    name: "Minimal".to_string(),
+                    source_format: "cherri".to_string(),
+                    source: "#define name Minimal\nshowNotification(\"ok\", \"x\")\n".to_string(),
+                    sign_mode: "anyone".to_string(),
+                    ttl_seconds: 120,
+                },
+                &state,
+            )
+            .unwrap();
+            let mut metadata = load_metadata(&storage, &built.id).unwrap().unwrap();
+            metadata.expires_at = now_unix() - 10;
+            save_metadata(&storage, &metadata).unwrap();
+            assert!(build_dir(&storage, &built.id).exists());
+        }
+
+        run_gc(&GcConfig {
+            storage: storage.clone(),
+            expired_before_age: Duration::from_secs(0),
+        })
+        .unwrap();
+        assert!(scan_metadata(&storage).unwrap().is_empty());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn build_slot_saturation_returns_server_busy() {
+        let root = test_temp_dir("shortcut-forge-server-busy");
+        let storage = root.join("data");
+        fs::create_dir_all(&storage).unwrap();
+        let (cherri, shortcuts) = install_fake_tools(&root, "Cherri Compiler v2.3.0", "signed v1");
+        let state = make_test_state(&storage, &cherri, &shortcuts);
+
+        let first = BuildSlot::try_acquire(&state).unwrap();
+        match BuildSlot::try_acquire(&state) {
+            Ok(_) => panic!("second build slot should not be acquired"),
+            Err(err) => {
+                assert_eq!(err.code, "SERVER_BUSY");
+                assert_eq!(err.status, 503);
+            }
+        }
+        drop(first);
+        assert!(BuildSlot::try_acquire(&state).is_ok());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn test_temp_dir(prefix: &str) -> PathBuf {
         for _ in 0..16 {
             let suffix = base64url_no_pad(&random_bytes(8).unwrap());
@@ -2619,5 +2790,83 @@ printf 'signed shortcut bytes' > "$out"
         fs::write(path, content).unwrap();
         #[cfg(unix)]
         fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    fn install_fake_tools(
+        root: &Path,
+        cherri_version: &str,
+        signed_text: &str,
+    ) -> (PathBuf, PathBuf) {
+        let tools = root.join("tools");
+        fs::create_dir_all(&tools).unwrap();
+        let cherri = tools.join("fake-cherri");
+        let shortcuts = tools.join("fake-shortcuts");
+        write_executable(
+            &cherri,
+            &format!(
+                r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "{cherri_version}"
+  exit 0
+fi
+out=""
+for arg in "$@"; do
+  case "$arg" in
+    --output=*) out="${{arg#--output=}}" ;;
+  esac
+done
+if [ -z "$out" ]; then
+  exit 2
+fi
+printf 'unsigned shortcut' > "$out"
+"#
+            ),
+        );
+        write_executable(
+            &shortcuts,
+            &format!(
+                r#"#!/bin/sh
+if [ "$1" = "help" ] && [ "$2" = "sign" ]; then
+  echo "sign help"
+  exit 0
+fi
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    out="$1"
+  fi
+  shift
+done
+if [ -z "$out" ]; then
+  exit 2
+fi
+printf '{signed_text}' > "$out"
+"#
+            ),
+        );
+        (cherri, shortcuts)
+    }
+
+    fn make_test_state(storage: &Path, cherri: &Path, shortcuts: &Path) -> AppState {
+        AppState {
+            config: Config {
+                host: "127.0.0.1".to_string(),
+                port: 8787,
+                public_base_url: "http://127.0.0.1:8787".to_string(),
+                storage: storage.to_path_buf(),
+                max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
+                build_timeout: Duration::from_secs(5),
+                max_build_concurrency: 1,
+                auth_token: "test-token".to_string(),
+                health_cache_ttl: Duration::from_secs(60),
+                cherri_bin: cherri.to_string_lossy().to_string(),
+                shortcuts_bin: shortcuts.to_string_lossy().to_string(),
+            },
+            build_locks: Mutex::new(HashMap::new()),
+            build_slots: Mutex::new(0),
+            health_cache: Mutex::new(None),
+            _storage_lock: StorageLock::acquire(storage).unwrap(),
+        }
     }
 }
