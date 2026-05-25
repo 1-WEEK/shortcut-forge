@@ -405,7 +405,16 @@ fn handle_connection(mut stream: TcpStream, state: Arc<AppState>) -> io::Result<
         ("GET", "/health") => handle_health(&request, &state),
         ("POST", "/api/builds") => {
             if !is_authorized(&request, &state.config.auth_token) {
-                api_error("UNAUTHORIZED", 401, "missing or invalid bearer token").into_response()
+                let response = api_error("UNAUTHORIZED", 401, "missing or invalid bearer token")
+                    .into_response();
+                let status = response.status;
+                write_response(&mut stream, response)?;
+                let _ = drain_small_body_after_rejection(&mut stream, &request, leftover);
+                eprintln!(
+                    "request method={} route={} status={}",
+                    request.method, route, status
+                );
+                return Ok(());
             } else {
                 match read_request_body(&mut stream, &request, leftover, body_limit(&state.config))
                 {
@@ -445,16 +454,20 @@ fn body_limit(config: &Config) -> usize {
 }
 
 fn read_http_headers(stream: &mut TcpStream) -> Result<(Vec<u8>, Vec<u8>), ApiError> {
+    read_http_headers_from(stream)
+}
+
+fn read_http_headers_from<R: Read>(reader: &mut R) -> Result<(Vec<u8>, Vec<u8>), ApiError> {
     let mut buffer = Vec::new();
-    let mut chunk = [0u8; 1024];
+    let mut byte = [0u8; 1];
     loop {
-        let count = stream
-            .read(&mut chunk)
+        let count = reader
+            .read(&mut byte)
             .map_err(|_| api_error("INTERNAL_ERROR", 500, "failed to read request"))?;
         if count == 0 {
             return Err(api_error("VALIDATION_FAILED", 400, "empty request"));
         }
-        buffer.extend_from_slice(&chunk[..count]);
+        buffer.push(byte[0]);
         if buffer.len() > HEADER_LIMIT {
             return Err(api_error(
                 "PAYLOAD_TOO_LARGE",
@@ -463,9 +476,8 @@ fn read_http_headers(stream: &mut TcpStream) -> Result<(Vec<u8>, Vec<u8>), ApiEr
             ));
         }
         if let Some(end) = find_header_end(&buffer) {
-            let leftover = buffer[end..].to_vec();
             buffer.truncate(end);
-            return Ok((buffer, leftover));
+            return Ok((buffer, Vec::new()));
         }
     }
 }
@@ -569,6 +581,37 @@ fn read_request_body(
         leftover.extend_from_slice(&chunk[..count]);
     }
     Ok(leftover)
+}
+
+fn drain_small_body_after_rejection(
+    stream: &mut TcpStream,
+    request: &HttpRequestHead,
+    mut leftover: Vec<u8>,
+) -> io::Result<()> {
+    const MAX_REJECTED_BODY_DRAIN: usize = 64 * 1024;
+    let Some(length) = request
+        .header("content-length")
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        return Ok(());
+    };
+    if length > MAX_REJECTED_BODY_DRAIN {
+        return Ok(());
+    }
+    if leftover.len() > length {
+        leftover.truncate(length);
+    }
+    let mut remaining = length.saturating_sub(leftover.len());
+    let mut buffer = [0u8; 4096];
+    while remaining > 0 {
+        let read_len = remaining.min(buffer.len());
+        let count = stream.read(&mut buffer[..read_len])?;
+        if count == 0 {
+            break;
+        }
+        remaining -= count;
+    }
+    Ok(())
 }
 
 fn is_authorized(request: &HttpRequestHead, expected: &str) -> bool {
@@ -2318,6 +2361,23 @@ mod tests {
         let request = BuildRequest::parse(body, 1024).unwrap();
         assert_eq!(request.source, "showNotification(\"ok\", \"x\")\n");
         assert_eq!(request.sign_mode, "anyone");
+    }
+
+    #[test]
+    fn header_reader_does_not_consume_body_bytes() {
+        let request = b"POST /api/builds HTTP/1.1\r\nHost: localhost\r\nContent-Length: 11\r\n\r\nsecret-body";
+        let mut cursor = io::Cursor::new(request);
+        let (headers, leftover) = read_http_headers_from(&mut cursor).unwrap();
+        assert!(
+            std::str::from_utf8(&headers)
+                .unwrap()
+                .contains("POST /api/builds")
+        );
+        assert!(leftover.is_empty());
+        assert_eq!(
+            cursor.position() as usize,
+            request.len() - "secret-body".len()
+        );
     }
 
     #[test]
