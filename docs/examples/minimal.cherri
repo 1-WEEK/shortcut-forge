@@ -1,0 +1,2 @@
+#define name Minimal Signed POC
+showNotification("Minimal shortcut signed successfully.", "Shortcut Server")

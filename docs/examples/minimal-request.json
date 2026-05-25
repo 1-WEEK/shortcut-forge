@@ -1,0 +1,7 @@
+{
+  "name": "Minimal Signed POC",
+  "source_format": "cherri",
+  "source": "#define name Minimal Signed POC\nshowNotification(\"Minimal shortcut signed successfully.\", \"Shortcut Server\")\n",
+  "sign_mode": "anyone",
+  "ttl_seconds": 2592000
+}

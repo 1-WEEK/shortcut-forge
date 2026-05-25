@@ -1,0 +1,7 @@
+{
+  "name": "Switch Profile",
+  "source_format": "cherri",
+  "source": "#define name Switch Profile\nshowNotification(\"ok\", \"POC\")\n",
+  "sign_mode": "anyone",
+  "ttl_seconds": 2592000
+}

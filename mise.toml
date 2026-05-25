@@ -1,0 +1,23 @@
+[tools]
+rust = "stable"
+"github:electrikmilk/cherri" = "2.3.0"
+
+[tasks.check-env]
+description = "Verify macOS, mise-managed Rust/Cherri, and shortcuts sign"
+run = "bash scripts/check-env.sh"
+
+[tasks.check-openapi]
+description = "Validate or parse the static OpenAPI contract"
+run = "bash scripts/check-openapi.sh"
+
+[tasks.test]
+description = "Run Shortcut Forge Rust tests"
+run = "cargo test"
+
+[tasks.run-local]
+description = "Run Shortcut Forge on http://127.0.0.1:8787"
+run = "cargo run -- serve"
+
+[tasks.smoke-build]
+description = "Run the HTTP smoke test against the configured server URL"
+run = "bash scripts/smoke-build.sh"

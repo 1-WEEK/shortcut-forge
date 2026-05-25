@@ -1,0 +1,431 @@
+openapi: 3.1.0
+info:
+  title: Shortcut Forge
+  version: 0.1.0
+  description: |
+    Generic macOS service that accepts complete Cherri source, builds and signs an iOS Shortcut,
+    persists the signed artifact, and returns a tokenized download URL.
+servers:
+  - url: http://127.0.0.1:8787
+    description: Local default
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: |
+        Anonymous requests return basic liveness. Requests with a valid Bearer token may include
+        detailed tool availability. Requests with an invalid Authorization header return
+        UNAUTHORIZED.
+      security:
+        - {}
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/HealthBasicResponse"
+                  - $ref: "#/components/schemas/HealthDetailedResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/builds:
+    post:
+      summary: Build and sign a Shortcut from complete Cherri source
+      description: |
+        Protected endpoint. The server authenticates before reading or parsing the request body.
+        Re-posting the same source keeps the same deterministic build id, refreshes metadata and
+        expiry, and returns a fresh tokenized download URL.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BuildRequest"
+            examples:
+              minimal:
+                value:
+                  name: Minimal Signed POC
+                  source_format: cherri
+                  source: "#define name Minimal Signed POC\nshowNotification(\"Minimal shortcut signed successfully.\", \"Shortcut Server\")\n"
+                  sign_mode: anyone
+                  ttl_seconds: 2592000
+      responses:
+        "200":
+          description: Build is ready and a tokenized download URL has been issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildResponse"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          description: Build or signing failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                build_failed:
+                  value:
+                    ok: false
+                    error:
+                      code: BUILD_FAILED
+                      message: Cherri compile failed
+                sign_failed:
+                  value:
+                    ok: false
+                    error:
+                      code: SIGN_FAILED
+                      message: shortcuts sign failed
+        "503":
+          description: Required tool unavailable or server busy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                tool_unavailable:
+                  value:
+                    ok: false
+                    error:
+                      code: TOOL_UNAVAILABLE
+                      message: required external tool is unavailable
+                server_busy:
+                  value:
+                    ok: false
+                    error:
+                      code: SERVER_BUSY
+                      message: build concurrency limit reached
+        "504":
+          $ref: "#/components/responses/Timeout"
+  /api/builds/{id}:
+    get:
+      summary: Get build metadata
+      description: |
+        Protected endpoint for diagnostics. This endpoint does not issue or reconstruct plaintext
+        download tokens; download_url is always null. Re-post the same source to /api/builds to get a
+        fresh tokenized download URL.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BuildId"
+      responses:
+        "200":
+          description: Build metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildMetadata"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /s/{download_token}:
+    get:
+      summary: Download signed Shortcut
+      description: |
+        Unauthenticated endpoint opened by iPhone install flows. The path token is the download
+        credential. Malformed or unknown tokens, expired builds, failed builds, and missing artifacts
+        all return 404.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/DownloadToken"
+      responses:
+        "200":
+          description: Signed Shortcut bytes
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: Attachment filename for the signed shortcut.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    BuildId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[0-9a-f]{32,}$"
+      description: Fixed-length lowercase hex build id, at least 32 characters.
+    DownloadToken:
+      name: download_token
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^dl_[A-Za-z0-9_-]{22,}$"
+      description: URL-safe random token. Recommended format is dl_ plus base64url without padding.
+  responses:
+    ValidationFailed:
+      description: Bad request fields
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            invalid_source_format:
+              value:
+                ok: false
+                error:
+                  code: VALIDATION_FAILED
+                  message: source_format must be cherri
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            missing_token:
+              value:
+                ok: false
+                error:
+                  code: UNAUTHORIZED
+                  message: missing or invalid bearer token
+    PayloadTooLarge:
+      description: Source or request body exceeds configured limit
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            too_large:
+              value:
+                ok: false
+                error:
+                  code: PAYLOAD_TOO_LARGE
+                  message: request body exceeds configured limit
+    NotFound:
+      description: Build id or download token not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            not_found:
+              value:
+                ok: false
+                error:
+                  code: NOT_FOUND
+                  message: not found
+    Timeout:
+      description: Compile or sign phase exceeded configured timeout
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            timeout:
+              value:
+                ok: false
+                error:
+                  code: TIMEOUT
+                  message: build phase timed out
+  schemas:
+    HealthBasicResponse:
+      type: object
+      required: [ok, data]
+      properties:
+        ok:
+          const: true
+        data:
+          type: object
+          required: [version, status, auth_required]
+          properties:
+            version:
+              type: string
+              example: 0.1.0
+            status:
+              type: string
+              enum: [ok]
+            auth_required:
+              type: boolean
+              const: true
+    HealthDetailedResponse:
+      type: object
+      required: [ok, data]
+      properties:
+        ok:
+          const: true
+        data:
+          type: object
+          required: [version, status, auth_required, cherri, shortcuts_sign, cache_ttl_seconds]
+          properties:
+            version:
+              type: string
+              example: 0.1.0
+            status:
+              type: string
+              enum: [ok]
+            auth_required:
+              type: boolean
+              const: true
+            cherri:
+              type: string
+              example: Cherri Compiler v2.3.0
+            shortcuts_sign:
+              type: string
+              enum: [available, unavailable]
+            cache_ttl_seconds:
+              type: integer
+              minimum: 0
+              example: 60
+    BuildRequest:
+      type: object
+      required: [name, source_format, source]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        source_format:
+          type: string
+          enum: [cherri]
+        source:
+          type: string
+          minLength: 1
+        sign_mode:
+          type: string
+          enum: [anyone]
+          default: anyone
+        ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 2592000
+          default: 2592000
+    BuildResponse:
+      type: object
+      required: [id, download_url, expires_at]
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/BuildId"
+        download_url:
+          type: string
+          format: uri
+          example: http://127.0.0.1:8787/s/dl_Eu4j6rN6kY6kYj3E9qJ0Dw
+        expires_at:
+          type: string
+          format: date-time
+    BuildMetadata:
+      type: object
+      required:
+        - id
+        - name
+        - source_format
+        - source_hash
+        - sign_mode
+        - status
+        - download_url
+        - download_token_count
+        - toolchain
+        - created_at
+        - updated_at
+        - expires_at
+        - error
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/BuildId"
+        name:
+          type: string
+        source_format:
+          type: string
+          enum: [cherri]
+        source_hash:
+          type: string
+          description: Full SHA-256 hex source fingerprint.
+        sign_mode:
+          type: string
+          enum: [anyone]
+        status:
+          type: string
+          enum: [ready, failed, expired]
+        download_url:
+          type: "null"
+          description: Metadata responses never issue plaintext download tokens.
+        download_token_count:
+          type: integer
+          minimum: 0
+        toolchain:
+          $ref: "#/components/schemas/Toolchain"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        error:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/ErrorBody"
+    Toolchain:
+      type: object
+      required: [cherri, shortcuts_sign, fingerprint]
+      additionalProperties: false
+      properties:
+        cherri:
+          type: string
+        shortcuts_sign:
+          type: string
+          enum: [available, unavailable]
+        fingerprint:
+          type: string
+    BuildId:
+      type: string
+      pattern: "^[0-9a-f]{32,}$"
+    ErrorResponse:
+      type: object
+      required: [ok, error]
+      additionalProperties: false
+      properties:
+        ok:
+          const: false
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+    ErrorBody:
+      type: object
+      required: [code, message]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum:
+            - VALIDATION_FAILED
+            - UNAUTHORIZED
+            - PAYLOAD_TOO_LARGE
+            - BUILD_FAILED
+            - SIGN_FAILED
+            - NOT_FOUND
+            - TOOL_UNAVAILABLE
+            - SERVER_BUSY
+            - TIMEOUT
+            - INTERNAL_ERROR
+        message:
+          type: string
