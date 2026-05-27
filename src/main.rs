@@ -1982,11 +1982,36 @@ fn run_launchctl_command(args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+struct ColorCodes {
+    bold: &'static str,
+    dim: &'static str,
+    yellow: &'static str,
+    cyan: &'static str,
+    reset: &'static str,
+}
+
 fn run_init(command: &InitConfig) -> Result<(), String> {
     let interactive_stdio = io::stdin().is_terminal() && io::stdout().is_terminal();
     if !interactive_stdio && !command.yes && !command.non_interactive {
         return Err("init needs a terminal or --yes/--non-interactive".to_string());
     }
+    let c = if interactive_stdio {
+        ColorCodes {
+            bold: "\x1b[1m",
+            dim: "\x1b[2m",
+            yellow: "\x1b[33m",
+            cyan: "\x1b[36m",
+            reset: "\x1b[0m",
+        }
+    } else {
+        ColorCodes {
+            bold: "",
+            dim: "",
+            yellow: "",
+            cyan: "",
+            reset: "",
+        }
+    };
 
     let app_support = app_support_dir()?;
     let log_dir = default_log_dir()?;
@@ -2028,6 +2053,7 @@ fn run_init(command: &InitConfig) -> Result<(), String> {
         .filter(|value| !value.trim().is_empty())
         .cloned();
     let auth_token = existing_auth_token
+        .clone()
         .unwrap_or(generate_service_auth_token().map_err(|err| err.to_string())?);
     let cherri_bin = existing_map
         .as_ref()
@@ -2112,13 +2138,34 @@ fn run_init(command: &InitConfig) -> Result<(), String> {
         })?;
     }
 
-    println!("Initialized Shortcut Forge");
-    println!("service_url = {}", config.public_base_url);
-    println!("config = {}", command.config_path.display());
-    println!("auth_token = stored in {}", command.config_path.display());
+    println!("{}{}Initialized Shortcut Forge{}", c.bold, c.cyan, c.reset);
+    println!();
     println!(
-        "smoke = shortcut-forge smoke --config \"{}\"",
-        command.config_path.display()
+        "  {}service_url{}   {}",
+        c.dim, c.reset, config.public_base_url
+    );
+    println!(
+        "  {}config{}        {}",
+        c.dim, c.reset, command.config_path.display()
+    );
+    println!();
+    if existing_auth_token.is_some() {
+        println!("  {}auth_token{}    {}{}[unchanged]", c.dim, c.reset, c.dim, c.reset);
+    } else {
+        println!(
+            "  {}Save this token. It will not be displayed again.{}",
+            c.yellow, c.reset
+        );
+        println!();
+        println!(
+            "  {}auth_token{}    {}{}{}",
+            c.dim, c.reset, c.cyan, config.auth_token, c.reset
+        );
+    }
+    println!();
+    println!(
+        "  {}smoke{}         shortcut-forge smoke --config \"{}\"",
+        c.dim, c.reset, command.config_path.display()
     );
     Ok(())
 }
