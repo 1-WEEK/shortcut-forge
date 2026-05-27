@@ -84,21 +84,21 @@ implementation. Keep documentation clear about that distinction:
 For code or API changes, run:
 
 ```bash
-bash scripts/check-env.sh
-bash scripts/check-openapi.sh
-cargo test
+mise run check-env
+mise run check-openapi
+mise run test
 ```
 
 For runtime acceptance, start the server:
 
 ```bash
-cargo run -- serve --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
 ```
 
 In another shell:
 
 ```bash
-SERVER_AUTH_TOKEN=<token> bash scripts/smoke-build.sh
+SERVER_AUTH_TOKEN=<token> mise run smoke-build
 ```
 
 Final acceptance requires importing the generated signed shortcut on an iPhone.

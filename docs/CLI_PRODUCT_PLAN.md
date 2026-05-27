@@ -57,8 +57,8 @@ shortcut-forge gc --config <file>
 ## First-Run Flow
 
 ```bash
-cargo build --release
-target/release/shortcut-forge init
+mise run install
+shortcut-forge init
 shortcut-forge start
 shortcut-forge smoke
 ```
@@ -68,8 +68,8 @@ Current `init` behavior:
 - creates `~/Library/Application Support/ShortcutForge/`
 - creates `~/Library/Application Support/ShortcutForge/data/`
 - creates `~/Library/Logs/ShortcutForge/`
-- generates a high-entropy service auth token when one does not already exist
-- preserves an existing `auth_token` unless the operator rotates it later
+- generates and prints a high-entropy service auth token when one does not already exist
+- preserves an existing `auth_token` and prints `[unchanged]` unless the operator rotates it later
 - detects the Cherri binary path when possible
 - defaults `shortcuts_bin` to `/usr/bin/shortcuts`
 - suggests `http://<hostname>.local:8787` as `public_base_url`
@@ -78,7 +78,7 @@ Current `init` behavior:
 - writes `~/Library/LaunchAgents/com.shortcut-forge.plist`
 - validates the plist with `plutil -lint`
 - can optionally start the service immediately in interactive mode
-- prints the service URL, config path, token location, and smoke command
+- prints the service URL, config path, auth token (or `[unchanged]`), and smoke command
 
 The user should not need to hand-edit a plist during the happy path.
 

@@ -35,7 +35,7 @@ cargo run -- smoke
 Low-level server:
 
 ```bash
-cargo run -- serve --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
 ```
 
 Local cleanup:
@@ -237,8 +237,8 @@ Compiler and signer output is not persisted as raw diagnostics because those too
 Run:
 
 ```bash
-cargo test
-bash scripts/check-openapi.sh
+mise run test
+mise run check-openapi
 ```
 
 The unit tests cover validation, JSON parsing, ID stability, token behavior, metadata

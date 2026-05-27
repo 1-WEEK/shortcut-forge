@@ -1,0 +1,9 @@
+scopes:
+    - name: data
+      description: static data assets used by the application; does not include source code or configuration
+    - name: packaging
+      description: build packaging artifacts and deployment manifests; excludes source files
+    - name: scripts
+      description: utility scripts for development, CI, and maintenance; not host application logic
+    - name: src
+      description: application source code and binaries; does not contain documentation or generated artifacts

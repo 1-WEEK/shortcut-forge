@@ -14,6 +14,14 @@ run = "bash scripts/check-openapi.sh"
 description = "Run Shortcut Forge Rust tests"
 run = "cargo test"
 
+[tasks.build-release]
+description = "Build Shortcut Forge release binary"
+run = "cargo build --release"
+
+[tasks.install]
+description = "Build and install shortcut-forge binary to ~/.local/bin"
+run = "cargo build --release && install -d \"$HOME/.local/bin\" && install -m 755 target/release/shortcut-forge \"$HOME/.local/bin/shortcut-forge\""
+
 [tasks.run-local]
 description = "Run Shortcut Forge on http://127.0.0.1:8787"
 run = "cargo run -- serve"

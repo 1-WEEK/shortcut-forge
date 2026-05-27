@@ -48,14 +48,14 @@ Read in this order:
 ## Common Commands
 
 ```bash
-bash scripts/check-env.sh
-bash scripts/check-openapi.sh
-cargo test
+mise run check-env
+mise run check-openapi
+mise run test
 cargo run -- init
 cargo run -- start
 cargo run -- smoke
-cargo run -- serve --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
-SERVER_AUTH_TOKEN=<token> bash scripts/smoke-build.sh
+mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+SERVER_AUTH_TOKEN=<token> mise run smoke-build
 ```
 
 ## Before Changing Docs

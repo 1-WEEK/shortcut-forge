@@ -487,7 +487,7 @@ directory and must not require callers to invoke a network endpoint.
 
 ## Acceptance Criteria
 
-1. `bash scripts/check-env.sh` passes on the Mac.
+1. `mise run check-env` passes on the Mac.
 2. The implementation's documented test command passes.
 3. `GET /health` returns basic liveness without auth, and detailed tool status with valid auth.
 4. Protected endpoints reject missing or invalid Bearer auth with `UNAUTHORIZED`.

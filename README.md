@@ -15,10 +15,8 @@ On the Mac that will sign shortcuts:
 ```bash
 mise trust
 mise install
-bash scripts/check-env.sh
-cargo build --release
-install -d "$HOME/.local/bin"
-install -m 755 target/release/shortcut-forge "$HOME/.local/bin/shortcut-forge"
+mise run check-env
+mise run install
 ```
 
 Initialize the operator config and LaunchAgent:
@@ -34,7 +32,7 @@ This creates:
 - `~/Library/Logs/ShortcutForge/`
 - `~/Library/LaunchAgents/com.shortcut-forge.plist`
 
-`init` preserves an existing `auth_token` unless you explicitly rotate it later.
+`init` generates and prints a new `auth_token` when one does not already exist. It preserves an existing token unless you explicitly rotate it later.
 
 ## Use
 
@@ -226,13 +224,13 @@ tail -n 80 "$HOME/Library/Logs/ShortcutForge/stdout.log" \
 ## Develop
 
 ```bash
-bash scripts/check-env.sh
-bash scripts/check-openapi.sh
-cargo test
+mise run check-env
+mise run check-openapi
+mise run test
 shortcut-forge init
 shortcut-forge start
 shortcut-forge smoke
-cargo run -- serve --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
 ```
 
 The packaged templates remain in `packaging/` for reference and recovery. Manual plist editing is

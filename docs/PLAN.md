@@ -27,9 +27,9 @@ Keep these P0 boundaries stable:
 Routine checks:
 
 ```bash
-bash scripts/check-env.sh
-bash scripts/check-openapi.sh
-cargo test
+mise run check-env
+mise run check-openapi
+mise run test
 ```
 
 Runtime smoke test:
@@ -43,8 +43,8 @@ cargo run -- smoke
 Low-level API smoke test:
 
 ```bash
-cargo run -- serve --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
-SERVER_AUTH_TOKEN=<token> bash scripts/smoke-build.sh
+mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+SERVER_AUTH_TOKEN=<token> mise run smoke-build
 ```
 
 Manual acceptance:
