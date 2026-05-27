@@ -14,7 +14,6 @@ Copy this whole directory to the Mac. If you are following the Rust implementati
 `mise` first, then run:
 
 ```bash
-cd mac-shortcut-build-sign-server
 mise trust
 mise install
 bash scripts/check-env.sh
