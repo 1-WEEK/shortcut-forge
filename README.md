@@ -1,29 +1,37 @@
 # Shortcut Forge
 
-A Mac service that builds and signs iOS Shortcuts from [Cherri](https://github.com/electrikmilk/cherri) source.
+A macOS service that builds and signs iOS Shortcuts from [Cherri](https://github.com/electrikmilk/cherri) source.
 
-Send it Cherri source, get back a download URL that iPhone can open directly. The server handles compilation and signing; you own what the shortcut does.
+Send it Cherri source, get back a download URL that iPhone can open directly. The server handles compilation and signing. You own what the shortcut does.
 
 ## Install
 
-On the signing Mac:
+You need [Rust](https://rustup.rs/) and [Cherri](https://github.com/electrikmilk/cherri) installed first.
+
+Install Cherri (pick one):
 
 ```bash
-mise trust
-mise install
-mise run check-env
-mise run install
+# Homebrew
+brew tap electrikmilk/cherri
+brew install electrikmilk/cherri/cherri
+
+# Or grab a prebuilt binary from GitHub Releases
+# https://github.com/electrikmilk/cherri/releases
 ```
 
-Then set up config and register the background service:
+Install Shortcut Forge:
+
+```bash
+cargo install --git https://github.com/1-week/shortcut-forge
+```
+
+Initialize config and register the background service:
 
 ```bash
 shortcut-forge init
 ```
 
-This creates the config file, data directory, log directories, and a LaunchAgent plist so the service can run at login.
-
-`init` prints a generated `auth_token`. It keeps an existing token unless you ask to rotate it later.
+`init` creates the config file, data directory, log directory, and a LaunchAgent plist so the service starts at login. It prints a generated `auth_token`. If a token already exists, it keeps it. You can rotate later.
 
 ## Quick Start
 
@@ -33,11 +41,11 @@ shortcut-forge start
 shortcut-forge smoke
 ```
 
-`smoke` submits the sample request from `docs/examples/minimal-request.json`, fetches the download URL, and saves the signed shortcut to `/tmp/minimal.signed.shortcut`. Open that on iPhone to import.
+`smoke` submits the sample request in `docs/examples/minimal-request.json`, fetches the download URL, and saves the signed shortcut to `/tmp/minimal.signed.shortcut`. Open that file on iPhone to import.
 
 ## Config
 
-The config file lives at `~/Library/Application Support/ShortcutForge/shortcut-forge.conf`. It's a flat `key = value` file:
+The config file lives at `~/Library/Application Support/ShortcutForge/shortcut-forge.conf`. Flat `key = value` format:
 
 ```text
 host = "0.0.0.0"
@@ -45,11 +53,11 @@ port = 8787
 public_base_url = "http://mac-mini.local:8787"
 storage = "/Users/YOU/Library/Application Support/ShortcutForge/data"
 auth_token = "CHANGE_ME"
-cherri_bin = "/Users/YOU/.local/share/mise/installs/github-electrikmilk-cherri/2.3.0/cherri"
+cherri_bin = "/opt/homebrew/bin/cherri"
 shortcuts_bin = "/usr/bin/shortcuts"
 ```
 
-Config from CLI flags overrides environment variables, which override the config file.
+Priority order: CLI flags > environment variables > config file.
 
 View and edit config safely:
 
@@ -99,7 +107,7 @@ shortcut-forge build docs/examples/minimal-request.json
 
 Re-posting the same source returns a fresh download URL under the same build ID. Old URLs keep working until they expire.
 
-Health check (no auth needed for basic liveness):
+Health check (no auth required):
 
 ```bash
 curl http://mac-mini.local:8787/health
@@ -116,7 +124,7 @@ host = "0.0.0.0"
 public_base_url = "http://mac-mini.local:8787"
 ```
 
-`host` controls where the server binds. `public_base_url` controls the download URLs it generates. Use a hostname callers can resolve — Bonjour name (`mac-mini.local`), DHCP hostname, fixed IP, or local DNS record.
+`host` controls where the server binds. `public_base_url` controls the download URLs it generates. Use a hostname callers can resolve: Bonjour name (`mac-mini.local`), DHCP hostname, fixed IP, or local DNS record.
 
 Bearer auth over plain HTTP assumes a trusted network. On untrusted networks, put the service behind Tailscale, WireGuard, an SSH tunnel, or an HTTPS reverse proxy.
 
@@ -151,6 +159,18 @@ shortcut-forge gc --config "$HOME/Library/Application Support/ShortcutForge/shor
 
 ## Development
 
+Building from source requires [mise](https://mise.jdx.dev/) to lock the toolchain versions:
+
+```bash
+mise trust
+mise install
+mise run check-env
+mise run test
+cargo build --release
+```
+
+Local development flow:
+
 ```bash
 mise run check-env
 mise run check-openapi
@@ -161,9 +181,9 @@ shortcut-forge smoke
 mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
 ```
 
-Relevant docs:
+Docs:
 
-- `docs/SPEC.md` — full behavior and API contract
-- `docs/RUST_ARCHITECTURE.md` — implementation notes
-- `docs/AGENT_HANDOFF.md` — context for coding agents
-- `docs/openapi.yaml` — machine-readable API contract
+- `docs/SPEC.md` - full behavior and API contract
+- `docs/RUST_ARCHITECTURE.md` - implementation notes
+- `docs/AGENT_HANDOFF.md` - context for coding agents
+- `docs/openapi.yaml` - machine-readable API contract
