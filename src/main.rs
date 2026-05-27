@@ -1051,6 +1051,7 @@ fn run_build_pipeline(
     config: &Config,
 ) -> Result<PathBuf, ApiError> {
     let temp_dir = create_private_temp_dir(&config.storage, "build")
+        .and_then(fs::canonicalize)
         .map_err(|_| api_error("INTERNAL_ERROR", 500, "failed to create build directory"))?;
     let cleanup = TempDirCleanup(temp_dir.clone());
     let source_path = temp_dir.join("source.cherri");
@@ -1121,9 +1122,9 @@ fn run_build_pipeline(
         ));
     }
 
-    let retained = config
-        .storage
-        .join("tmp")
+    let retained = temp_dir
+        .parent()
+        .unwrap_or(&temp_dir)
         .join(format!("signed-{id}-{}.shortcut", now_unix()));
     fs::create_dir_all(retained.parent().expect("retained has parent"))
         .map_err(|_| api_error("INTERNAL_ERROR", 500, "failed to prepare temp output"))?;
@@ -2347,6 +2348,8 @@ fn sha256(input: &[u8]) -> [u8; 32] {
 mod tests {
     use super::*;
 
+    static CURRENT_DIR_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn sha256_matches_known_vector() {
         assert_eq!(
@@ -2770,6 +2773,48 @@ printf 'signed shortcut bytes' > "$out"
         drop(first);
         assert!(BuildSlot::try_acquire(&state).is_ok());
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn build_pipeline_handles_relative_storage_paths() {
+        let _guard = CURRENT_DIR_LOCK.lock().unwrap();
+        let root = test_temp_dir("shortcut-forge-relative-storage");
+        let original_dir = env::current_dir().unwrap();
+        let relative_root = root.join("work");
+        let storage = relative_root.join("relative-data");
+        fs::create_dir_all(&storage).unwrap();
+        let (cherri, shortcuts) =
+            install_fake_tools(&root, "Cherri Compiler v2.3.0", "signed relative");
+
+        env::set_current_dir(&relative_root).unwrap();
+        let result = run_build_pipeline(
+            &BuildRequest {
+                name: "Minimal".to_string(),
+                source_format: "cherri".to_string(),
+                source: "#define name Minimal\nshowNotification(\"ok\", \"x\")\n".to_string(),
+                sign_mode: "anyone".to_string(),
+                ttl_seconds: 120,
+            },
+            "0123456789abcdef0123456789abcdef",
+            &Config {
+                host: "127.0.0.1".to_string(),
+                port: 8787,
+                public_base_url: "http://127.0.0.1:8787".to_string(),
+                storage: PathBuf::from("./relative-data"),
+                max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
+                build_timeout: Duration::from_secs(5),
+                max_build_concurrency: 1,
+                auth_token: "test-token".to_string(),
+                health_cache_ttl: Duration::from_secs(60),
+                cherri_bin: cherri.to_string_lossy().to_string(),
+                shortcuts_bin: shortcuts.to_string_lossy().to_string(),
+            },
+        );
+        env::set_current_dir(original_dir).unwrap();
+
+        let signed_path = result.unwrap();
+        assert_eq!(fs::read_to_string(&signed_path).unwrap(), "signed relative");
         fs::remove_dir_all(root).unwrap();
     }
 
