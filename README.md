@@ -1,16 +1,12 @@
 # Shortcut Forge
 
-Shortcut Forge is a Mac service that builds and signs iOS Shortcuts.
+A Mac service that builds and signs iOS Shortcuts from [Cherri](https://github.com/electrikmilk/cherri) source.
 
-You send complete Cherri source. It compiles the source with `cherri`, signs the shortcut with
-macOS `shortcuts sign`, stores the signed `.shortcut`, and returns an iPhone-openable download URL.
-
-It does not render shortcut source, understand business fields, create QR codes, or make iCloud
-sharing links.
+Send it Cherri source, get back a download URL that iPhone can open directly. The server handles compilation and signing; you own what the shortcut does.
 
 ## Install
 
-On the Mac that will sign shortcuts:
+On the signing Mac:
 
 ```bash
 mise trust
@@ -19,61 +15,29 @@ mise run check-env
 mise run install
 ```
 
-Initialize the operator config and LaunchAgent:
+Then set up config and register the background service:
 
 ```bash
 shortcut-forge init
 ```
 
-This creates:
+This creates the config file, data directory, log directories, and a LaunchAgent plist so the service can run at login.
 
-- `~/Library/Application Support/ShortcutForge/shortcut-forge.conf`
-- `~/Library/Application Support/ShortcutForge/data/`
-- `~/Library/Logs/ShortcutForge/`
-- `~/Library/LaunchAgents/com.shortcut-forge.plist`
+`init` prints a generated `auth_token`. It keeps an existing token unless you ask to rotate it later.
 
-`init` generates and prints a new `auth_token` when one does not already exist. It preserves an existing token unless you explicitly rotate it later.
-
-## Use
-
-Shortcut Forge is CLI-first. There is no required GUI.
+## Quick Start
 
 ```bash
-shortcut-forge --help
 shortcut-forge init
 shortcut-forge start
-shortcut-forge status
 shortcut-forge smoke
-shortcut-forge doctor
-shortcut-forge logs --lines 80
-shortcut-forge config show
-shortcut-forge token rotate
-shortcut-forge build docs/examples/minimal-request.json
-shortcut-forge gc --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
-shortcut-forge serve --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
 ```
 
-Commands:
+`smoke` submits the sample request from `docs/examples/minimal-request.json`, fetches the download URL, and saves the signed shortcut to `/tmp/minimal.signed.shortcut`. Open that on iPhone to import.
 
-- `init` creates the config, log directories, and LaunchAgent plist.
-- `doctor` checks config, toolchain, launchd, ports, and local health.
-- `start`, `stop`, `restart`, and `status` manage the launchd service.
-- `logs` tails `stdout.log` and `stderr.log`.
-- `config show` and `config set` inspect and edit config safely.
-- `token rotate` rotates the service Bearer auth token.
-- `smoke` submits the sample request and downloads the signed shortcut locally.
-- `build` wraps `POST /api/builds` for local operator use.
-- `serve` starts the HTTP build/sign server.
-- `gc` removes expired local build artifacts.
-- `--help` prints supported flags.
+## Config
 
-Config precedence:
-
-```text
-CLI flags > SHORTCUT_SERVER_* environment variables > config file > defaults
-```
-
-The config file is a flat `key = value` file. Example:
+The config file lives at `~/Library/Application Support/ShortcutForge/shortcut-forge.conf`. It's a flat `key = value` file:
 
 ```text
 host = "0.0.0.0"
@@ -85,23 +49,25 @@ cherri_bin = "/Users/YOU/.local/share/mise/installs/github-electrikmilk-cherri/2
 shortcuts_bin = "/usr/bin/shortcuts"
 ```
 
-The CLI is the primary product surface. A tray app can be added later as a management UI over the
-same CLI/config/launchd service.
+Config from CLI flags overrides environment variables, which override the config file.
 
-## Build A Shortcut
-
-Happy path:
+View and edit config safely:
 
 ```bash
-shortcut-forge init
-shortcut-forge start
-shortcut-forge smoke
+shortcut-forge config show
+shortcut-forge config set public_base_url "http://mac-mini.local:8787"
 ```
 
-`smoke` submits `docs/examples/minimal-request.json`, fetches the returned download URL, and writes
-the signed shortcut to `/tmp/minimal.signed.shortcut` by default.
+Rotate the auth token:
 
-You can still call the API directly or run the low-level server command:
+```bash
+shortcut-forge token rotate
+shortcut-forge restart
+```
+
+## API
+
+Start the server and build a shortcut:
 
 ```bash
 shortcut-forge serve --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
@@ -123,87 +89,40 @@ Response:
 }
 ```
 
-Open `download_url` on the iPhone to import the signed shortcut.
+Open `download_url` on iPhone to import the signed shortcut.
 
-## Other Operations
-
-Health:
-
-```bash
-shortcut-forge status
-shortcut-forge doctor
-```
-
-Tail logs:
-
-```bash
-shortcut-forge logs --follow
-```
-
-Show or edit config:
-
-```bash
-shortcut-forge config show
-shortcut-forge config set public_base_url "http://mac-mini.local:8787"
-```
-
-Build from a request file without writing curl flags by hand:
+You can also use the `build` command as a shorthand:
 
 ```bash
 shortcut-forge build docs/examples/minimal-request.json
 ```
 
-Refresh a download URL by re-posting the same source:
+Re-posting the same source returns a fresh download URL under the same build ID. Old URLs keep working until they expire.
+
+Health check (no auth needed for basic liveness):
 
 ```bash
-shortcut-forge build docs/examples/minimal-request.json
+curl http://mac-mini.local:8787/health
 ```
 
-The build ID stays stable and the server returns a fresh `/s/dl_...` download URL. Older
-unexpired download URLs keep working until their TTL.
+The full API contract is in `docs/openapi.yaml`.
 
-Rotate the service auth token:
+## LAN Access
 
-1. Run `shortcut-forge token rotate`.
-2. Update callers.
-3. Run `shortcut-forge restart`.
-
-P0 does not support hot token reload or overlapping old/new service tokens.
-
-Run cleanup:
-
-```bash
-shortcut-forge gc --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
-```
-
-There is no HTTP delete endpoint in P0.
-
-## LAN Hostname
-
-For LAN use:
+For other devices on the LAN to reach the service:
 
 ```text
 host = "0.0.0.0"
 public_base_url = "http://mac-mini.local:8787"
 ```
 
-`host` controls where the server binds. `public_base_url` controls generated download URLs. It does
-not register DNS.
+`host` controls where the server binds. `public_base_url` controls the download URLs it generates. Use a hostname callers can resolve — Bonjour name (`mac-mini.local`), DHCP hostname, fixed IP, or local DNS record.
 
-Use a hostname or IP that the caller and iPhone can resolve:
+Bearer auth over plain HTTP assumes a trusted network. On untrusted networks, put the service behind Tailscale, WireGuard, an SSH tunnel, or an HTTPS reverse proxy.
 
-- Bonjour name, such as `mac-mini.local`
-- router DHCP hostname
-- fixed LAN IP
-- local DNS record
+## Background Service
 
-## Run At Login
-
-Use `launchd` for normal Mac deployment.
-
-`shortcut-forge init` writes `~/Library/LaunchAgents/com.shortcut-forge.plist` for you.
-
-Normal operator flow:
+`shortcut-forge init` registers a LaunchAgent. Manage it with:
 
 ```bash
 shortcut-forge start
@@ -212,16 +131,25 @@ shortcut-forge restart
 shortcut-forge stop
 ```
 
-If you need the underlying LaunchAgent details:
+View logs:
 
 ```bash
-plutil -lint "$HOME/Library/LaunchAgents/com.shortcut-forge.plist"
-launchctl print "gui/$(id -u)/com.shortcut-forge"
-tail -n 80 "$HOME/Library/Logs/ShortcutForge/stdout.log" \
-  "$HOME/Library/Logs/ShortcutForge/stderr.log"
+shortcut-forge logs --follow
 ```
 
-## Develop
+Check system health:
+
+```bash
+shortcut-forge doctor
+```
+
+Clean up expired builds:
+
+```bash
+shortcut-forge gc --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+```
+
+## Development
 
 ```bash
 mise run check-env
@@ -233,12 +161,9 @@ shortcut-forge smoke
 mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
 ```
 
-The packaged templates remain in `packaging/` for reference and recovery. Manual plist editing is
-no longer required on the happy path.
+Relevant docs:
 
-Useful docs:
-
-- `docs/SPEC.md` - behavior and API contract
-- `docs/RUST_ARCHITECTURE.md` - current Rust implementation notes
-- `docs/AGENT_HANDOFF.md` - context for future coding agents
-- `docs/openapi.yaml` - static OpenAPI contract
+- `docs/SPEC.md` — full behavior and API contract
+- `docs/RUST_ARCHITECTURE.md` — implementation notes
+- `docs/AGENT_HANDOFF.md` — context for coding agents
+- `docs/openapi.yaml` — machine-readable API contract
