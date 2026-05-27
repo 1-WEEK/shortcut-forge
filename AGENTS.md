@@ -102,3 +102,11 @@ SERVER_AUTH_TOKEN=<token> mise run smoke-build
 ```
 
 Final acceptance requires importing the generated signed shortcut on an iPhone.
+
+## Hotspot Ownership
+
+`src/main.rs` is the intentional P0 single-file implementation.
+- Owner: operator / any agent making non-trivial changes.
+- Stable boundary: keep Rust std-only with no external crates; preserve CLI command surface and HTTP route contracts.
+- Verification: `cargo test` and `mise run smoke-build`.
+- Splitting into modules requires explicit justification in `docs/RUST_ARCHITECTURE.md`.
