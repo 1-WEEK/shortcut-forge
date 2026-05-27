@@ -69,7 +69,8 @@ The implementation must:
 - Return JSON API errors with stable codes.
 - Provide a documented local run command and test command.
 
-The implementation may choose any stack that satisfies these requirements.
+This specification is intentionally stack-neutral. The current repository implementation is Rust and
+is documented in `docs/RUST_ARCHITECTURE.md`; keep implementation-specific details there.
 
 ## OpenAPI Contract
 
@@ -218,6 +219,10 @@ max_build_concurrency default: 1
 auth_token       required; no default
 health_cache_ttl default: 60 seconds
 ```
+
+Configuration may come from CLI flags, environment variables, or a local config file. Long-lived
+operator deployments should be able to keep the service auth token and LAN public base URL in a
+permission-restricted config file instead of requiring shell environment setup on every restart.
 
 For a caller on another LAN machine, the service must be able to bind `0.0.0.0` and return URLs
 under the Mac LAN `public_base_url`.

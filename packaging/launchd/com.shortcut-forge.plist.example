@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.shortcut-forge</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/.local/bin/shortcut-forge</string>
+    <string>serve</string>
+    <string>--config</string>
+    <string>/Users/YOU/Library/Application Support/ShortcutForge/shortcut-forge.conf</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU/Library/Application Support/ShortcutForge</string>
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/Library/Logs/ShortcutForge/stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/Library/Logs/ShortcutForge/stderr.log</string>
+</dict>
+</plist>

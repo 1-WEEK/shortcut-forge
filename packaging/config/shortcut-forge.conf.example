@@ -1,0 +1,19 @@
+# Shortcut Forge config file.
+# Format: flat key = value. Quotes are recommended for strings.
+
+host = "0.0.0.0"
+port = 8787
+public_base_url = "http://mac-mini.local:8787"
+storage = "/Users/YOU/Library/Application Support/ShortcutForge/data"
+
+max_source_bytes = 524288
+build_timeout_seconds = 30
+max_build_concurrency = 1
+health_cache_ttl_seconds = 60
+
+auth_token = "CHANGE_ME"
+cherri_bin = "/Users/YOU/.local/share/mise/installs/github-electrikmilk-cherri/2.3.0/cherri"
+shortcuts_bin = "/usr/bin/shortcuts"
+
+# Used by `shortcut-forge gc` when --expired-before is omitted.
+expired_before = "30d"

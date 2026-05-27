@@ -1,12 +1,33 @@
 # AGENTS.md
 
-This directory is a standalone handoff package for building Shortcut Forge, the Mac Shortcut Build/Sign Server.
-It must remain generic: do not import or depend on Tsugi source code.
+This repository is Shortcut Forge, a standalone macOS Shortcut build/sign server.
+
+Keep the project generic. Do not import Tsugi source code, add Tsugi-specific request fields, or
+teach the server business meaning. The caller renders complete Cherri source; this service builds,
+signs, stores, and serves it.
+
+## Read Order
+
+For any non-trivial change, read these first:
+
+1. `README.md` - human run/test/operate entrypoint.
+2. `docs/SPEC.md` - behavior and API contract.
+3. `docs/RUST_ARCHITECTURE.md` - current implementation shape.
+4. `docs/AGENT_HANDOFF.md` - concise continuation context.
+
+Use `docs/openapi.yaml` when API behavior changes. Use `docs/PLAN.md` only for roadmap/backlog
+context; it is not a from-scratch implementation prompt.
 
 ## Mission
 
-Build a macOS HTTP service that accepts complete Cherri source, compiles it with `cherri`,
-signs it with macOS `shortcuts sign`, stores the signed `.shortcut`, and serves a stable download URL.
+Maintain a macOS HTTP service that:
+
+- Accepts complete Cherri source.
+- Compiles it with `cherri`.
+- Signs it with macOS `shortcuts sign`.
+- Stores the signed `.shortcut` and metadata.
+- Returns and serves tokenized download URLs.
+- Exposes health and build metadata endpoints.
 
 ## Responsibility Split
 
@@ -15,54 +36,63 @@ signs it with macOS `shortcuts sign`, stores the signed `.shortcut`, and serves 
 - Understand business meaning.
 - Render complete Cherri source.
 - Embed endpoints, tokens, names, app-intent parameters, and control flow into that source.
-- Generate and display QR codes.
+- Generate and display QR codes if needed.
 - Decide when a shortcut should be regenerated.
 
-### Mac Server Responsibilities
+### Server Responsibilities
 
 - Validate generic build requests.
+- Require generic service authentication for protected API endpoints.
 - Compile Cherri source.
 - Sign compiled shortcuts.
 - Persist signed output and metadata.
-- Return and serve stable download URLs.
+- Return and serve stable tokenized download URLs.
 - Expose health and build metadata endpoints.
 
-### Explicit Non-Responsibilities
+## Non-Responsibilities
 
 - Do not understand Tsugi business fields.
 - Do not accept fields like `profile_id`, `switch_url`, `sleep_url`, or `token`.
 - Do not template or mutate shortcut source.
-- Do not log request `source`; it can contain secrets embedded by the caller.
-- Do require generic service authentication for protected API endpoints in P0.
 - Do not treat service authentication as a Tsugi business token or request body field.
-- Do not log service auth tokens or download tokens.
-- Do not expose destructive cleanup/delete HTTP endpoints for P0.
 - Do not create iCloud sharing links.
 - Do not generate QR codes for P0.
 - Do not generate or manage iPhone NFC automations.
+- Do not expose destructive cleanup/delete HTTP endpoints for P0.
+
+## Security Rules
+
+- Do not log request `source`; it can contain caller-embedded secrets.
+- Do not log `Authorization` headers, service auth tokens, or download tokens.
+- Persist only download token hashes, never plaintext download tokens.
+- Authenticate protected routes before reading or parsing request bodies.
+- Invoke `cherri` and `shortcuts sign` with structured arguments, never shell interpolation.
+- Sanitize filenames before using request `name` in `Content-Disposition`.
 
 ## Technology Policy
 
-Do not treat this package as prescribing an implementation stack.
+The original package contract is stack-neutral, but this repository now contains the P0 Rust
+implementation. Keep documentation clear about that distinction:
 
-The implementation may use any reasonable local macOS server technology as long as it satisfies
-`docs/SPEC.md`, ships clear run/test commands, and depends only on tools that are documented in the
-implementation README.
+- `docs/SPEC.md` remains stack-neutral.
+- `docs/RUST_ARCHITECTURE.md` documents the current Rust implementation.
+- Do not reintroduce a separate startup prompt that tells agents to choose a fresh stack unless the
+  operator explicitly asks for a rewrite.
 
-Required external capabilities are only:
+## Verification
 
-- `cherri`
-- macOS `shortcuts sign`
-- A local HTTP server implementation chosen by the Mac-side agent
-
-## Verification Before Done
-
-Run:
+For code or API changes, run:
 
 ```bash
 bash scripts/check-env.sh
-<project test command documented by the implementation>
-<project run command documented by the implementation>
+bash scripts/check-openapi.sh
+cargo test
+```
+
+For runtime acceptance, start the server:
+
+```bash
+cargo run -- serve --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
 ```
 
 In another shell:
