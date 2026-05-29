@@ -607,9 +607,8 @@ fn build_runtime_config(
         "public-base-url",
         "SHORTCUT_SERVER_PUBLIC_BASE_URL",
     )
-    .unwrap_or_else(|| format!("http://127.0.0.1:{port}"))
-    .trim_end_matches('/')
-    .to_string();
+    .map(|url| normalize_public_base_url(&url, port))
+    .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
     let storage = config_value(flags, file_config, "storage", "SHORTCUT_SERVER_STORAGE")
         .unwrap_or_else(|| "./data".to_string());
     let max_source_bytes = parse_usize_config(
@@ -705,9 +704,8 @@ fn build_runtime_config_from_file(
     )?
     .unwrap_or(DEFAULT_PORT);
     let public_base_url = config_value_with_env(&flags, file_config, "public-base-url", None)
-        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"))
-        .trim_end_matches('/')
-        .to_string();
+        .map(|url| normalize_public_base_url(&url, port))
+        .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
     let storage = config_value_with_env(&flags, file_config, "storage", None)
         .unwrap_or_else(|| "./data".to_string());
     let max_source_bytes = parse_usize_value(
@@ -1830,6 +1828,42 @@ fn extract_url_host(url: &str) -> Result<String, String> {
     Ok(authority.split(':').next().unwrap_or("").to_string())
 }
 
+fn authority_has_port(authority: &str) -> bool {
+    if authority.is_empty() {
+        return false;
+    }
+    let host_start = authority.rfind('@').map_or(0, |i| i + 1);
+    let host_port = &authority[host_start..];
+    if let Some(rest) = host_port.strip_prefix('[') {
+        rest.contains("]:")
+    } else {
+        host_port.contains(':')
+    }
+}
+
+fn normalize_public_base_url(url: &str, port: u16) -> String {
+    let trimmed = url.trim_end_matches('/');
+    let rest = trimmed
+        .strip_prefix("http://")
+        .or_else(|| trimmed.strip_prefix("https://"))
+        .unwrap_or(trimmed);
+    let authority = rest.split('/').next().unwrap_or("");
+    if authority.is_empty() {
+        return trimmed.to_string();
+    }
+    if !authority_has_port(authority) {
+        let is_default = if trimmed.starts_with("https://") {
+            port == 443
+        } else {
+            port == 80
+        };
+        if !is_default {
+            return format!("{}:{}", trimmed, port);
+        }
+    }
+    trimmed.to_string()
+}
+
 fn localize_service_url(url: &str, config: &Config) -> Result<String, String> {
     Ok(format!(
         "{}{}",
@@ -2090,7 +2124,7 @@ fn run_init(command: &InitConfig) -> Result<(), String> {
     let config = Config {
         host,
         port,
-        public_base_url: public_base_url.trim_end_matches('/').to_string(),
+        public_base_url: normalize_public_base_url(&public_base_url, port),
         storage,
         max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
         build_timeout: Duration::from_secs(DEFAULT_BUILD_TIMEOUT_SECONDS),
@@ -5356,5 +5390,67 @@ printf '{signed_text}' > "$out"
             health_cache: Mutex::new(None),
             _storage_lock: StorageLock::acquire(storage).unwrap(),
         }
+    }
+
+    #[test]
+    fn normalize_public_base_url_appends_non_default_port() {
+        assert_eq!(
+            normalize_public_base_url("http://mac-mini.home", 8787),
+            "http://mac-mini.home:8787"
+        );
+    }
+
+    #[test]
+    fn normalize_public_base_url_preserves_existing_port() {
+        assert_eq!(
+            normalize_public_base_url("http://mac-mini.home:8787", 8787),
+            "http://mac-mini.home:8787"
+        );
+        assert_eq!(
+            normalize_public_base_url("http://mac-mini.home:8080", 8787),
+            "http://mac-mini.home:8080"
+        );
+    }
+
+    #[test]
+    fn normalize_public_base_url_skips_default_ports() {
+        assert_eq!(
+            normalize_public_base_url("http://mac-mini.home", 80),
+            "http://mac-mini.home"
+        );
+        assert_eq!(
+            normalize_public_base_url("https://mac-mini.home", 443),
+            "https://mac-mini.home"
+        );
+    }
+
+    #[test]
+    fn normalize_public_base_url_handles_ipv6() {
+        assert_eq!(
+            normalize_public_base_url("http://[::1]", 8787),
+            "http://[::1]:8787"
+        );
+        assert_eq!(
+            normalize_public_base_url("http://[::1]:8787", 8787),
+            "http://[::1]:8787"
+        );
+    }
+
+    #[test]
+    fn normalize_public_base_url_trims_trailing_slash() {
+        assert_eq!(
+            normalize_public_base_url("http://mac-mini.home/", 8787),
+            "http://mac-mini.home:8787"
+        );
+    }
+
+    #[test]
+    fn authority_has_port_detects_ports_correctly() {
+        assert!(!authority_has_port("mac-mini.home"));
+        assert!(authority_has_port("mac-mini.home:8787"));
+        assert!(!authority_has_port("[::1]"));
+        assert!(authority_has_port("[::1]:8787"));
+        assert!(!authority_has_port("user:pass@mac-mini.home"));
+        assert!(authority_has_port("user:pass@mac-mini.home:8787"));
     }
 }
