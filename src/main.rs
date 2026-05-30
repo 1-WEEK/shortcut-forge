@@ -27,7 +27,7 @@ use crate::store::run_gc;
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let cli = if args.len() > 1 && args[1].starts_with("--") {
+    let cli = if args.len() > 1 && args[1].starts_with("--") && !matches!(args[1].as_str(), "--version" | "--help") {
         let mut new_args = vec![args[0].clone(), "serve".to_string()];
         new_args.extend(args.into_iter().skip(1));
         Cli::parse_from(&new_args)
