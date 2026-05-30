@@ -1,26 +1,27 @@
 # Rust Implementation Notes
 
-This document describes the current P0 Rust implementation. `docs/SPEC.md` remains the
+This document describes the current Rust implementation. `docs/SPEC.md` remains the
 stack-neutral behavior and API source of truth.
 
 ## Stack
 
-The current implementation is intentionally small:
-
 | Area | Current choice |
 |---|---|
 | Language | Rust 2024 |
-| Dependencies | Rust standard library only |
-| HTTP | Blocking `TcpListener`/`TcpStream` HTTP/1.1 handling |
-| Concurrency | One thread per accepted connection plus in-process locks |
-| JSON | Small local JSON parser/serializer in `src/main.rs` |
-| Config | CLI flags plus `SHORTCUT_SERVER_*` environment variables |
+| Dependencies | `axum`, `tokio`, `serde`, `serde_json`, `clap`, `toml`, `thiserror`, `anyhow` |
+| HTTP | `axum` router on `tokio::net::TcpListener` |
+| Concurrency | Async tasks with `tokio::sync::Mutex` / `Semaphore` |
+| JSON | `serde` + `serde_json` |
+| Config | TOML file deserialized via `serde` |
+| CLI | `clap` derive API |
+| Error handling | `thiserror` for library errors, `anyhow` at boundaries |
 | Toolchain management | `mise.toml` pins Rust stable and Cherri 2.3.0 |
 | Build tools | `cherri` and macOS `shortcuts sign` invoked with structured args |
 | Storage | Local files under the configured storage directory |
 
-There are no crates to install beyond the Rust toolchain. `Cargo.toml` should stay dependency-free
-unless a future change clearly justifies the added maintenance surface.
+`Cargo.toml` was originally std-only for P0. The current stack adds crates only where they replace
+hand-rolled infrastructure (parsers, config, CLI) or where the runtime model benefits from an async
+framework (HTTP routing, middleware).
 
 ## Runtime Commands
 
@@ -35,13 +36,13 @@ cargo run -- smoke
 Low-level server:
 
 ```bash
-mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.toml"
 ```
 
 Local cleanup:
 
 ```bash
-cargo run -- gc --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+cargo run -- gc --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.toml"
 ```
 
 Other operator commands:
@@ -77,29 +78,44 @@ Precedence is CLI flags, then environment variables, then config file, then defa
 
 ## Source Layout
 
-The implementation currently lives in one file:
+Modules are split by responsibility:
 
 ```text
 src/main.rs
-  CLI parsing and config
-  init / doctor / launchd operator workflow
-  local curl-backed smoke/build wrappers
-  blocking HTTP server
-  request parsing and routing
-  auth and constant-time comparison
-  API request validation
-  build orchestration and renewal
-  Cherri compile / Shortcuts sign pipeline
-  metadata and artifact persistence
-  download token generation and resolution
-  health tool probing and cache
-  local GC command
-  unit tests
+  async entry point (tokio::main) and module declarations
+
+src/cli.rs
+  clap derive definitions for all commands, flags, and help text
+
+src/config.rs
+  TOML loading, env mapping, Config deserialization, defaults
+
+src/error.rs
+  thiserror error enums and anyhow boundary conversions
+
+src/model.rs
+  shared serde structs: BuildRequest, BuildResponse, BuildMetadata, etc.
+
+src/http.rs
+  axum Router, middleware (auth, body limit), and server startup
+
+src/api.rs
+  async route handlers: health, build, metadata, download
+
+src/state.rs
+  AppState: Config, build-slot Semaphore, build-lock table
+
+src/build.rs
+  temp-dir creation, Cherri invocation, shortcuts sign, metadata write
+
+src/store.rs
+  scan_metadata, run_gc, token hashing, storage layout
+
+src/operator.rs
+  init, doctor, start/stop/restart/status/logs, LaunchAgent plist
 ```
 
-Keep new code close to the existing shape unless a change creates enough complexity to justify
-splitting modules. If modules are introduced, preserve the same responsibilities rather than adding a
-framework rewrite as incidental cleanup.
+`src/json.rs` has been removed; all JSON handling uses `serde_json`.
 
 ## Build Identity
 
@@ -201,19 +217,19 @@ Timeout handling kills the child process and, on Unix, the process group.
 
 Malformed build IDs and download tokens return 404 before storage lookup.
 
-P0 does not expose `DELETE /api/builds/<id>` or any destructive cleanup HTTP route.
+The service does not expose `DELETE /api/builds/<id>` or any destructive cleanup HTTP route.
 
 ## Concurrency
 
 The service uses:
 
-- A per-build in-memory lock table to prevent identical builds from writing the same output at the
-  same time.
-- A global build-slot counter controlled by `max_build_concurrency`.
+- A per-build in-memory lock table (`tokio::sync::Mutex<HashMap<...>>`) to prevent identical
+  builds from writing the same output at the same time.
+- A global build-slot `tokio::sync::Semaphore` controlled by `max_build_concurrency`.
 - An exclusive storage lock at `<storage>/.lock` to prevent two server processes from serving the
   same storage root.
 
-P0 default concurrency is one build at a time. When build slots are saturated, the server returns
+Default concurrency is one build at a time. When build slots are saturated, the server returns
 `SERVER_BUSY` immediately; it does not queue builds behind the global limit.
 
 ## Logging and Secrecy
@@ -245,8 +261,26 @@ The unit tests cover validation, JSON parsing, ID stability, token behavior, met
 serialization, storage paths, GC, auth, and concurrency saturation. The smoke script covers the real
 HTTP path and requires a running server plus working macOS build/sign tools.
 
-## Future Refactor Boundary
+## Module Boundary Justification
 
-A future version may split `src/main.rs` into modules or adopt a small HTTP framework, but that
-should be a deliberate refactor. Do not reintroduce obsolete reference-architecture language unless
-the code actually moves to that stack.
+`src/main.rs` was split because it reached 5,456 lines / 217 functions, exceeding the threshold
+where a single human can keep the entire file in working memory. The boundary lines follow the
+responsibility split already present in the code:
+
+- `cli.rs` / `config.rs` — operator-facing surface (argument parsing and configuration).
+- `http.rs` / `api.rs` — request transport and route handling.
+- `build.rs` — the compile-and-sign pipeline.
+- `store.rs` — persistence, GC, and token resolution.
+- `operator.rs` — macOS service lifecycle.
+
+Keeping these boundaries stable means new features (new API routes, new CLI commands, new build
+stages) map to a single module rather than re-expanding the monolith.
+
+## Migration Notes
+
+- Config files migrated from flat `key = value` to TOML. String values now require quotes.
+- The blocking `TcpListener` loop was replaced by `tokio` + `axum`.
+- Shared mutable state (`build_lock_table`, concurrency slot counter) uses `tokio::sync::Mutex`
+  and `tokio::sync::Semaphore` because handlers hold them across await points.
+- Process spawning (`cherri`, `shortcuts sign`) uses `tokio::process::Command` to avoid blocking
+  the async runtime worker threads.

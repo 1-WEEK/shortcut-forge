@@ -71,7 +71,7 @@ Maintain a macOS HTTP service that:
 
 ## Technology Policy
 
-The original package contract is stack-neutral, but this repository now contains the P0 Rust
+The original package contract is stack-neutral, but this repository contains the Rust
 implementation. Keep documentation clear about that distinction:
 
 - `docs/SPEC.md` remains stack-neutral.
@@ -92,7 +92,7 @@ mise run test
 For runtime acceptance, start the server:
 
 ```bash
-mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.toml"
 ```
 
 In another shell:
@@ -105,8 +105,8 @@ Final acceptance requires importing the generated signed shortcut on an iPhone.
 
 ## Hotspot Ownership
 
-`src/main.rs` is the intentional P0 single-file implementation.
+`src/main.rs` is the service entry point. The codebase is split into modules under `src/`.
 - Owner: operator / any agent making non-trivial changes.
-- Stable boundary: keep Rust std-only with no external crates; preserve CLI command surface and HTTP route contracts.
+- Stable boundary: preserve CLI command surface and HTTP route contracts; module boundaries follow the responsibility split documented in `docs/RUST_ARCHITECTURE.md`.
 - Verification: `cargo test` and `mise run smoke-build`.
-- Splitting into modules requires explicit justification in `docs/RUST_ARCHITECTURE.md`.
+- New crates may be introduced only when they replace hand-rolled infrastructure or enable a necessary runtime model change (e.g., async HTTP). Avoid speculative dependencies.

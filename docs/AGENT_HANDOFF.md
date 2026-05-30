@@ -1,6 +1,6 @@
 # Agent Handoff
 
-Shortcut Forge already has a P0 Rust implementation. Do not treat this repository as a blank
+Shortcut Forge has a Rust implementation. Do not treat this repository as a blank
 handoff package unless the operator explicitly asks for a rewrite.
 
 ## Start Here
@@ -17,8 +17,8 @@ Read in this order:
 
 ## Current Implementation
 
-- Single Rust binary in `src/main.rs`.
-- Rust standard library only; `Cargo.toml` intentionally has no external dependencies.
+- Modular Rust binary under `src/`.
+- Uses `tokio`, `axum`, `serde`, `clap`, `toml`, `thiserror`, and `anyhow`.
 - CLI commands:
   - `cargo run -- init`
   - `cargo run -- start`
@@ -42,7 +42,7 @@ Read in this order:
 - `GET /api/builds/<id>` returns `download_url: null`.
 - Re-posting the same source returns the same deterministic ID and a fresh download URL.
 - Expired builds are not served, but metadata remains inspectable.
-- P0 exposes no destructive cleanup/delete HTTP endpoint.
+- The service exposes no destructive cleanup/delete HTTP endpoint.
 - Logs must not contain raw source, service auth tokens, or download tokens.
 
 ## Common Commands
@@ -54,7 +54,7 @@ mise run test
 cargo run -- init
 cargo run -- start
 cargo run -- smoke
-mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.toml"
 SERVER_AUTH_TOKEN=<token> mise run smoke-build
 ```
 

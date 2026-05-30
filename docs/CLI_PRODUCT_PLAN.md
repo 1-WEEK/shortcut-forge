@@ -74,7 +74,7 @@ Current `init` behavior:
 - defaults `shortcuts_bin` to `/usr/bin/shortcuts`
 - suggests `http://<hostname>.local:8787` as `public_base_url`
 - supports interactive input or `--yes` / `--non-interactive`
-- writes `shortcut-forge.conf` with mode `0600`
+- writes `shortcut-forge.toml` with mode `0600`
 - writes `~/Library/LaunchAgents/com.shortcut-forge.plist`
 - validates the plist with `plutil -lint`
 - can optionally start the service immediately in interactive mode
@@ -91,7 +91,7 @@ Interactive setup.
 Options:
 
 ```text
---config <file>             default ~/Library/Application Support/ShortcutForge/shortcut-forge.conf
+--config <file>             default ~/Library/Application Support/ShortcutForge/shortcut-forge.toml
 --host <host>               default 0.0.0.0
 --port <port>               default 8787
 --public-base-url <url>     default http://<hostname>.local:<port>
@@ -273,7 +273,7 @@ first delivery.
 ### Medium-Term Maintenance
 
 - Add stronger integration-test helpers around fake Cherri/Shortcuts binaries.
-- Consider splitting `src/main.rs` if the current single-file implementation becomes hard to change.
+- Keep module boundaries stable as the codebase evolves.
 - Improve launchd troubleshooting guidance without changing the low-level service model.
 
 ### Optional Future Product Work

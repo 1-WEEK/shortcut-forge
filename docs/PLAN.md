@@ -43,7 +43,7 @@ cargo run -- smoke
 Low-level API smoke test:
 
 ```bash
-mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.toml"
 SERVER_AUTH_TOKEN=<token> mise run smoke-build
 ```
 
@@ -71,17 +71,16 @@ Manual acceptance:
 - Re-run smoke tests on a Mac after changes to build/sign behavior.
 - Keep CLI support as the primary management path. A future tray app must wrap the CLI/launchd
   service, not replace headless operation.
-- Keep `packaging/config/shortcut-forge.conf.example` aligned with CLI config keys.
+- Keep `packaging/config/shortcut-forge.toml.example` aligned with CLI config keys.
 
 ## Backlog
 
-- Split `src/main.rs` into modules if the single-file implementation starts slowing maintenance.
 - Add stronger integration test helpers for fake Cherri/Shortcuts binaries.
 - Add a documented operator procedure for backing up and restoring the storage directory.
 - Add optional structured logging configuration while preserving the no-secret logging rules.
 - Add a macOS tray management app for status, start/stop/restart, safe config edits, service-token
   rotation with restart, log access, and smoke-test launch.
-- Re-evaluate an HTTP framework only if routing, body parsing, or concurrency needs outgrow the
+- Evaluate additional middleware or observability crates only if operational needs outgrow the current
   standard-library implementation.
 - Re-evaluate runtime OpenAPI generation only if the API surface grows enough that maintaining the
   static `docs/openapi.yaml` becomes error-prone.
