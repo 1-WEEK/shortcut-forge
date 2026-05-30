@@ -81,7 +81,7 @@ Manual acceptance:
 - Add a macOS tray management app for status, start/stop/restart, safe config edits, service-token
   rotation with restart, log access, and smoke-test launch.
 - Evaluate additional middleware or observability crates only if operational needs outgrow the current
-  standard-library implementation.
+  async implementation.
 - Re-evaluate runtime OpenAPI generation only if the API surface grows enough that maintaining the
   static `docs/openapi.yaml` becomes error-prone.
 

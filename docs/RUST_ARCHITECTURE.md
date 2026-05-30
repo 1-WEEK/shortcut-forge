@@ -8,7 +8,7 @@ stack-neutral behavior and API source of truth.
 | Area | Current choice |
 |---|---|
 | Language | Rust 2024 |
-| Dependencies | `axum`, `tokio`, `serde`, `serde_json`, `clap`, `toml`, `thiserror`, `anyhow` |
+| Dependencies | `axum`, `tokio`, `serde`, `serde_json`, `clap`, `toml`, `thiserror`, `anyhow`, `sha2`, `base64` |
 | HTTP | `axum` router on `tokio::net::TcpListener` |
 | Concurrency | Async tasks with `tokio::sync::Mutex` / `Semaphore` |
 | JSON | `serde` + `serde_json` |

@@ -11,7 +11,7 @@
     <string>/Users/YOU/.local/bin/shortcut-forge</string>
     <string>serve</string>
     <string>--config</string>
-    <string>/Users/YOU/Library/Application Support/ShortcutForge/shortcut-forge.conf</string>
+    <string>/Users/YOU/Library/Application Support/ShortcutForge/shortcut-forge.toml</string>
   </array>
 
   <key>RunAtLoad</key>

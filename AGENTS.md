@@ -105,7 +105,7 @@ Final acceptance requires importing the generated signed shortcut on an iPhone.
 
 ## Hotspot Ownership
 
-`src/main.rs` is the service entry point. The codebase is split into modules under `src/`.
+`src/main.rs` is the async entry point (`#[tokio::main]`) and module declarations. The monolith was split into modules under `src/`.
 - Owner: operator / any agent making non-trivial changes.
 - Stable boundary: preserve CLI command surface and HTTP route contracts; module boundaries follow the responsibility split documented in `docs/RUST_ARCHITECTURE.md`.
 - Verification: `cargo test` and `mise run smoke-build`.

@@ -3,6 +3,9 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use crate::model::*;
 
 pub fn home_dir() -> Result<PathBuf, String> {
@@ -23,7 +26,7 @@ pub fn default_storage_dir() -> Result<PathBuf, String> {
 }
 
 pub fn default_config_path() -> Result<PathBuf, String> {
-    Ok(app_support_dir()?.join("shortcut-forge.conf"))
+    Ok(app_support_dir()?.join("shortcut-forge.toml"))
 }
 
 pub fn default_log_dir() -> Result<PathBuf, String> {
@@ -56,6 +59,76 @@ pub fn load_config_file(path: &Path) -> Result<HashMap<String, String>, String> 
         map.insert(normalized_key, str_value);
     }
     Ok(map)
+}
+
+/// Migrate a legacy `.conf` flat key=value file to TOML `.toml`.
+/// Returns `true` if a migration was performed.
+fn strip_line_comment(line: &str) -> &str {
+    let mut in_quote = false;
+    let mut escaped = false;
+    for (i, ch) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && in_quote {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            in_quote = !in_quote;
+            continue;
+        }
+        if ch == '#' && !in_quote {
+            return &line[..i];
+        }
+    }
+    line
+}
+
+pub fn migrate_legacy_config(toml_path: &Path) -> Result<bool, String> {
+    let conf_path = toml_path.with_extension("conf");
+    if !conf_path.exists() || toml_path.exists() {
+        return Ok(false);
+    }
+    let text = std::fs::read_to_string(&conf_path)
+        .map_err(|e| format!("failed to read legacy config {}: {e}", conf_path.display()))?;
+    let mut migrated = String::new();
+    for raw_line in text.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            migrated.push_str(raw_line);
+            migrated.push('\n');
+            continue;
+        }
+        let stripped = strip_line_comment(trimmed);
+        if let Some((key, value)) = stripped.split_once('=') {
+            let key = key.trim();
+            let value = value.trim();
+            let new_value = if value.starts_with('"') && value.ends_with('"') {
+                value.to_string()
+            } else if value == "true" || value == "false" {
+                value.to_string()
+            } else if value.parse::<i64>().is_ok() {
+                value.to_string()
+            } else {
+                format!("\"{}\"", value.replace('"', "\\\""))
+            };
+            migrated.push_str(&format!("{} = {}\n", key, new_value));
+        } else {
+            migrated.push_str(raw_line);
+            migrated.push('\n');
+        }
+    }
+    std::fs::write(toml_path, migrated)
+        .map_err(|e| format!("failed to write migrated config {}: {e}", toml_path.display()))?;
+    #[cfg(unix)]
+    {
+        let perms = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(toml_path, perms)
+            .map_err(|e| format!("failed to chmod migrated config {}: {e}", toml_path.display()))?;
+    }
+    Ok(true)
 }
 
 pub fn config_value(

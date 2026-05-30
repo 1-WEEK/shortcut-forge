@@ -102,6 +102,10 @@ pub fn run_init(command: &InitConfig) -> Result<(), String> {
         }
     };
 
+    if crate::config::migrate_legacy_config(&command.config_path)? {
+        println!("Migrated legacy config from .conf to .toml: {}", command.config_path.display());
+    }
+
     let app_support = app_support_dir()?;
     let log_dir = default_log_dir()?;
     let launch_agent_path = default_launch_agent_path()?;

@@ -1,6 +1,6 @@
 # Refactor Plan
 
-Status: approved  
+Status: completed  
 Scope: migrate from P0 zero-dependency single-file implementation to a modular, crate-based async Rust service. Business logic stays; infrastructure and runtime model change.
 
 ## Current Pain Points
@@ -54,11 +54,11 @@ Module boundaries:
 - `src/config.rs` — TOML loading, env mapping, `Config` deserialization.
 - `src/error.rs` — `thiserror` enums (`BuildError`, `StoreError`, `ApiError`), `anyhow` at boundaries.
 - `src/model.rs` — shared `serde` structs: `BuildRequest`, `BuildResponse`, `BuildMetadata`, etc.
-- `src/api.rs` — route handlers (`health`, `build`, `metadata`, `download`), sync signatures.
+- `src/api.rs` — async route handlers (`health`, `build`, `metadata`, `download`).
 - `src/build.rs` — temp-dir creation, Cherri invocation, `shortcuts sign`, metadata write.
 - `src/store.rs` — `scan_metadata`, `run_gc`, token hashing, storage layout.
 - `src/operator.rs` — `init`, `doctor`, `start`/`stop`/`restart`/`status`/`logs`, LaunchAgent plist.
-- `src/http.rs` — blocking `TcpListener` loop kept for this phase, but isolated and cleaned up.
+- `src/http.rs` — `axum` Router, middleware (auth, body limit), and server startup.
 - `src/main.rs` — entry point and module declarations only.
 - `src/json.rs` — **deleted**; all JSON replaced by `serde_json`.
 
@@ -85,8 +85,8 @@ Goal: replace blocking HTTP layer with async; move auth and limits to middleware
 `Cargo.toml` additions:
 
 ```toml
-axum = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "process", "macros"] }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "process", "macros", "fs", "io-util", "time", "signal"] }
 ```
 
 Changes:

@@ -314,7 +314,7 @@ mod tests {
     use crate::api::parse_build_request;
     use crate::config::{
         authority_has_port, build_runtime_config_from_file, first_sanitized_line,
-        load_config_file, normalize_public_base_url,
+        load_config_file, migrate_legacy_config, normalize_public_base_url,
     };
     use crate::operator::update_config_file_value;
     use crate::model::{
@@ -432,7 +432,7 @@ mod tests {
     #[test]
     fn config_file_parses_toml_values_and_comments() {
         let root = test_temp_dir("shortcut-forge-config-file");
-        let path = root.join("shortcut-forge.conf");
+        let path = root.join("shortcut-forge.toml");
         fs::write(
             &path,
             r#"
@@ -465,6 +465,48 @@ cherri_bin = "/opt/cherri"
     }
 
     #[test]
+    fn migrate_legacy_conf_to_toml() {
+        let root = test_temp_dir("shortcut-forge-migrate");
+        let conf = root.join("shortcut-forge.conf");
+        let toml = root.join("shortcut-forge.toml");
+
+        fs::write(
+            &conf,
+            r#"host = 127.0.0.1
+port = 8787
+storage = ./data
+auth_token = mytoken
+cherri_bin = /opt/cherri
+quoted = "already-quoted"
+enabled = true
+# comment
+max_source_bytes = 524288
+special = "val#ue" # inline comment
+"#,
+        )
+        .unwrap();
+
+        assert!(migrate_legacy_config(&toml).unwrap());
+        assert!(toml.exists());
+
+        let config = load_config_file(&toml).unwrap();
+        assert_eq!(config.get("host").unwrap(), "127.0.0.1");
+        assert_eq!(config.get("port").unwrap(), "8787");
+        assert_eq!(config.get("storage").unwrap(), "./data");
+        assert_eq!(config.get("auth-token").unwrap(), "mytoken");
+        assert_eq!(config.get("cherri-bin").unwrap(), "/opt/cherri");
+        assert_eq!(config.get("quoted").unwrap(), "already-quoted");
+        assert_eq!(config.get("enabled").unwrap(), "true");
+        assert_eq!(config.get("max-source-bytes").unwrap(), "524288");
+        assert_eq!(config.get("special").unwrap(), "val#ue");
+
+        // Second migration should be a no-op because .toml already exists.
+        assert!(!migrate_legacy_config(&toml).unwrap());
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn config_values_allow_flag_override() {
         let mut flags = HashMap::new();
         flags.insert("port".to_string(), "9999".to_string());
@@ -480,7 +522,7 @@ cherri_bin = "/opt/cherri"
     #[test]
     fn config_update_rewrites_matching_key() {
         let root = test_temp_dir("shortcut-forge-config-update");
-        let path = root.join("shortcut-forge.conf");
+        let path = root.join("shortcut-forge.toml");
         fs::write(
             &path,
             r#"# comment

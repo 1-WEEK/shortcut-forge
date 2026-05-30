@@ -18,7 +18,7 @@ Read in this order:
 ## Current Implementation
 
 - Modular Rust binary under `src/`.
-- Uses `tokio`, `axum`, `serde`, `clap`, `toml`, `thiserror`, and `anyhow`.
+- Uses `tokio`, `axum`, `serde`, `serde_json`, `clap`, `toml`, `thiserror`, `anyhow`, `sha2`, and `base64`.
 - CLI commands:
   - `cargo run -- init`
   - `cargo run -- start`

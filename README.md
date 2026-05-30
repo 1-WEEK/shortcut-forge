@@ -45,7 +45,7 @@ shortcut-forge smoke
 
 ## Config
 
-The config file lives at `~/Library/Application Support/ShortcutForge/shortcut-forge.conf`. Flat `key = value` format:
+The config file lives at `~/Library/Application Support/ShortcutForge/shortcut-forge.toml`. TOML format:
 
 ```text
 host = "0.0.0.0"
@@ -78,7 +78,7 @@ shortcut-forge restart
 Start the server and build a shortcut:
 
 ```bash
-shortcut-forge serve --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+shortcut-forge serve --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.toml"
 
 curl -sS \
   -X POST http://mac-mini.local:8787/api/builds \
@@ -154,7 +154,7 @@ shortcut-forge doctor
 Clean up expired builds:
 
 ```bash
-shortcut-forge gc --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+shortcut-forge gc --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.toml"
 ```
 
 ## Development
@@ -178,7 +178,7 @@ mise run test
 shortcut-forge init
 shortcut-forge start
 shortcut-forge smoke
-mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.conf"
+mise run run-local -- --config "$HOME/Library/Application Support/ShortcutForge/shortcut-forge.toml"
 ```
 
 Docs:
