@@ -7,19 +7,16 @@ use axum::response::{IntoResponse, Response};
 
 use crate::error::ApiError;
 use crate::model::{
-    BuildRequest, DEFAULT_TTL_SECONDS, MAX_TTL_SECONDS, MIN_TTL_SECONDS, VERSION, json_escape,
-    now_unix, format_rfc3339,
+    BuildRequest, DEFAULT_TTL_SECONDS, MAX_TTL_SECONDS, MIN_TTL_SECONDS, VERSION, format_rfc3339,
+    json_escape, now_unix,
 };
-use crate::state::{AppState, get_cached_toolchain, build_or_renew};
+use crate::state::{AppState, build_or_renew, get_cached_toolchain};
 use crate::store::{
     constant_time_eq, is_valid_build_id, is_valid_download_token, load_metadata, resolve_download,
     safe_filename, sha256_hex,
 };
 
-pub async fn health_handler(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Response {
+pub async fn health_handler(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     let auth_header = headers.get("authorization");
     let is_authed = auth_header
         .and_then(|h| h.to_str().ok())
@@ -56,10 +53,7 @@ pub async fn health_handler(
     }
 }
 
-pub async fn build_handler(
-    State(state): State<Arc<AppState>>,
-    body: Bytes,
-) -> Response {
+pub async fn build_handler(State(state): State<Arc<AppState>>, body: Bytes) -> Response {
     let request = match parse_build_request(&body, state.config.max_source_bytes) {
         Ok(request) => request,
         Err(err) => return err.into_response(),
@@ -124,8 +118,10 @@ pub async fn download_handler(
                 );
                 headers.insert(
                     header::CONTENT_DISPOSITION,
-                    axum::http::HeaderValue::from_str(&format!(r#"attachment; filename="{filename}""#))
-                        .unwrap(),
+                    axum::http::HeaderValue::from_str(&format!(
+                        r#"attachment; filename="{filename}""#
+                    ))
+                    .unwrap(),
                 );
                 (StatusCode::OK, headers, bytes).into_response()
             }
@@ -147,13 +143,20 @@ struct RawBuildRequest {
     ttl_seconds: Option<i64>,
 }
 
-pub(crate) fn parse_build_request(body: &[u8], max_source_bytes: usize) -> Result<BuildRequest, ApiError> {
+pub(crate) fn parse_build_request(
+    body: &[u8],
+    max_source_bytes: usize,
+) -> Result<BuildRequest, ApiError> {
     let value: serde_json::Value = serde_json::from_slice(body)
         .map_err(|e| ApiError::validation_failed(format!("invalid JSON: {e}")))?;
-    let object = value.as_object()
+    let object = value
+        .as_object()
         .ok_or_else(|| ApiError::validation_failed("request body must be a JSON object"))?;
     for key in object.keys() {
-        if !matches!(key.as_str(), "name" | "source_format" | "source" | "sign_mode" | "ttl_seconds") {
+        if !matches!(
+            key.as_str(),
+            "name" | "source_format" | "source" | "sign_mode" | "ttl_seconds"
+        ) {
             return Err(ApiError::validation_failed("unknown request field"));
         }
     }
@@ -170,17 +173,22 @@ pub(crate) fn parse_build_request(body: &[u8], max_source_bytes: usize) -> Resul
         return Err(ApiError::validation_failed("source must be non-empty"));
     }
     if raw.source.len() > max_source_bytes {
-        return Err(ApiError::payload_too_large("source exceeds configured limit"));
+        return Err(ApiError::payload_too_large(
+            "source exceeds configured limit",
+        ));
     }
     let sign_mode = raw.sign_mode.unwrap_or_else(|| "anyone".to_string());
     if sign_mode != "anyone" {
         return Err(ApiError::validation_failed("sign_mode must be anyone"));
     }
-    let ttl_seconds = raw.ttl_seconds
+    let ttl_seconds = raw
+        .ttl_seconds
         .map(|v| if v < 0 { 0 } else { v as u64 })
         .unwrap_or(DEFAULT_TTL_SECONDS);
     if !(MIN_TTL_SECONDS..=MAX_TTL_SECONDS).contains(&ttl_seconds) {
-        return Err(ApiError::validation_failed("ttl_seconds must be between 60 and 2592000"));
+        return Err(ApiError::validation_failed(
+            "ttl_seconds must be between 60 and 2592000",
+        ));
     }
     Ok(BuildRequest {
         name,

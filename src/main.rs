@@ -17,8 +17,8 @@ use clap::Parser;
 
 use crate::cli::*;
 use crate::config::{
-    build_runtime_config, config_value, default_config_path, default_storage_dir,
-    load_config_file, operator_config_path, parse_age,
+    build_runtime_config, config_value, default_config_path, default_storage_dir, load_config_file,
+    normalize_config_key, operator_config_path, parse_age,
 };
 use crate::model::*;
 use crate::operator::*;
@@ -27,7 +27,10 @@ use crate::store::run_gc;
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let cli = if args.len() > 1 && args[1].starts_with("--") && !matches!(args[1].as_str(), "--version" | "--help") {
+    let cli = if args.len() > 1
+        && args[1].starts_with("--")
+        && !matches!(args[1].as_str(), "--version" | "--help")
+    {
         let mut new_args = vec![args[0].clone(), "serve".to_string()];
         new_args.extend(args.into_iter().skip(1));
         Cli::parse_from(&new_args)
@@ -61,7 +64,9 @@ async fn run_serve(args: ServeArgs) -> Result<(), String> {
     let flags = serve_args_to_flags(&args);
     let file_config = load_config_for_serve(&args)?;
     let config = build_runtime_config(&flags, &file_config, true)?;
-    crate::http::serve(config).await.map_err(|e| format!("startup failed: {e}"))
+    crate::http::serve(config)
+        .await
+        .map_err(|e| format!("startup failed: {e}"))
 }
 
 fn serve_args_to_flags(args: &ServeArgs) -> HashMap<String, String> {
@@ -167,7 +172,9 @@ fn run_init_command(args: InitArgs) -> Result<(), String> {
         host: args.host,
         port: args.port,
         public_base_url: args.public_base_url,
-        storage: args.storage.unwrap_or_else(|| default_storage_dir().unwrap()),
+        storage: args
+            .storage
+            .unwrap_or_else(|| default_storage_dir().unwrap()),
         non_interactive: args.non_interactive,
         yes: args.yes,
     })
@@ -251,7 +258,7 @@ fn run_config_command(cmd: ConfigCmd) -> Result<(), String> {
             )?;
             run_config_set(&ConfigSetCommand {
                 config_path,
-                key: args.key,
+                key: normalize_config_key(&args.key),
                 value: args.value,
             })
         }
@@ -297,7 +304,6 @@ fn run_build_cli_command(args: BuildArgs) -> Result<(), String> {
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -312,22 +318,24 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use crate::api::parse_build_request;
+    use crate::build::run_build_pipeline;
+    use crate::cli::{ConfigCmd, ConfigSetArgs};
     use crate::config::{
-        authority_has_port, build_runtime_config_from_file, first_sanitized_line,
-        load_config_file, migrate_legacy_config, normalize_public_base_url,
+        authority_has_port, build_runtime_config_from_file, config_path_exists,
+        first_sanitized_line, is_supported_config_set_key, load_config_file, migrate_legacy_config,
+        normalize_config_key, normalize_public_base_url, operator_config_path, resolve_config_path,
+    };
+    use crate::model::{
+        BuildMetadata, BuildRequest, BuildStatus, Config, DEFAULT_MAX_SOURCE_BYTES,
+        DownloadTokenRecord, GcConfig, Toolchain, format_rfc3339, now_unix, parse_rfc3339,
     };
     use crate::operator::update_config_file_value;
-    use crate::model::{
-        BuildMetadata, BuildRequest, BuildStatus, Config, DownloadTokenRecord, GcConfig, Toolchain,
-        DEFAULT_MAX_SOURCE_BYTES, now_unix, format_rfc3339, parse_rfc3339,
-    };
     use crate::state::{AppState, BuildSlot, StorageLock, build_or_renew};
     use crate::store::{
         artifact_path, base64url_no_pad, build_dir, is_valid_build_id, is_valid_download_token,
         load_metadata, metadata_path, random_bytes, resolve_download, run_gc, save_metadata,
         scan_metadata, sha256_hex,
     };
-    use crate::build::run_build_pipeline;
 
     static CURRENT_DIR_LOCK: Mutex<()> = Mutex::new(());
 
@@ -507,6 +515,67 @@ special = "val#ue" # inline comment
     }
 
     #[test]
+    fn load_config_file_migrates_missing_toml_from_legacy_conf() {
+        let root = test_temp_dir("shortcut-forge-load-migrate");
+        let conf = root.join("shortcut-forge.conf");
+        let toml = root.join("shortcut-forge.toml");
+        fs::write(
+            &conf,
+            r#"host = 127.0.0.1
+port = 8787
+auth_token = oldtoken
+public_base_url = http://mac-mini.local:8787
+"#,
+        )
+        .unwrap();
+
+        assert!(config_path_exists(&toml));
+        let config = load_config_file(&toml).unwrap();
+
+        assert!(toml.exists());
+        assert_eq!(config.get("host").unwrap(), "127.0.0.1");
+        assert_eq!(config.get("auth-token").unwrap(), "oldtoken");
+        assert_eq!(
+            config.get("public-base-url").unwrap(),
+            "http://mac-mini.local:8787"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn explicit_legacy_conf_path_resolves_to_migrated_toml() {
+        let root = test_temp_dir("shortcut-forge-explicit-conf");
+        let conf = root.join("shortcut-forge.conf");
+        let toml = root.join("shortcut-forge.toml");
+        fs::write(&conf, "host = 127.0.0.1\nauth_token = oldtoken\n").unwrap();
+
+        let resolved = resolve_config_path(&conf).unwrap();
+        let config = load_config_file(&conf).unwrap();
+
+        assert_eq!(resolved, toml);
+        assert!(toml.exists());
+        assert_eq!(config.get("auth-token").unwrap(), "oldtoken");
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn operator_config_path_moves_legacy_conf_to_toml_name() {
+        let root = test_temp_dir("shortcut-forge-operator-config-path");
+        let conf = root.join("shortcut-forge.conf");
+        let expected = root.join("shortcut-forge.toml");
+
+        let path =
+            operator_config_path(Some(conf.display().to_string()), root.join("default.toml"))
+                .unwrap();
+
+        assert_eq!(path, expected);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn config_values_allow_flag_override() {
         let mut flags = HashMap::new();
         flags.insert("port".to_string(), "9999".to_string());
@@ -514,7 +583,13 @@ special = "val#ue" # inline comment
         file_config.insert("port".to_string(), "8787".to_string());
 
         assert_eq!(
-            crate::config::parse_u16_config(&flags, &file_config, "port", "SHORTCUT_FORGE_TEST_PORT").unwrap(),
+            crate::config::parse_u16_config(
+                &flags,
+                &file_config,
+                "port",
+                "SHORTCUT_FORGE_TEST_PORT"
+            )
+            .unwrap(),
             Some(9999)
         );
     }
@@ -540,6 +615,48 @@ public_base_url = "http://old.local:8787"
         assert!(updated.contains(r#"public_base_url = "http://new.local:8787""#));
 
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn config_set_accepts_underscore_key_from_cli_path() {
+        let root = test_temp_dir("shortcut-forge-config-set-underscore");
+        let path = root.join("shortcut-forge.toml");
+        fs::write(
+            &path,
+            r#"host = "127.0.0.1"
+port = 8787
+auth_token = "token"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(normalize_config_key("public_base_url"), "public-base-url");
+        assert!(is_supported_config_set_key("public_base_url"));
+        super::run_config_command(ConfigCmd::Set(ConfigSetArgs {
+            config: Some(path.clone()),
+            key: "public_base_url".to_string(),
+            value: "http://mac-mini.local:8787".to_string(),
+        }))
+        .unwrap();
+
+        let updated = fs::read_to_string(&path).unwrap();
+        assert!(updated.contains(r#"public_base_url = "http://mac-mini.local:8787""#));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn packaging_config_example_is_canonical_toml() {
+        let _guard = CURRENT_DIR_LOCK.lock().unwrap();
+        let toml = Path::new("packaging/config/shortcut-forge.toml.example");
+        let conf = Path::new("packaging/config/shortcut-forge.conf.example");
+
+        assert!(toml.exists());
+        assert!(!conf.exists());
+        assert_eq!(
+            load_config_file(toml).unwrap().get("auth-token").unwrap(),
+            "CHANGE_ME"
+        );
     }
 
     #[test]

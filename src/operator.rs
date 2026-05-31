@@ -10,9 +10,9 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use crate::model::*;
-use crate::config::*;
 use crate::build::probe_toolchain;
+use crate::config::*;
+use crate::model::*;
 
 pub struct InitConfig {
     pub config_path: PathBuf,
@@ -103,7 +103,10 @@ pub fn run_init(command: &InitConfig) -> Result<(), String> {
     };
 
     if crate::config::migrate_legacy_config(&command.config_path)? {
-        println!("Migrated legacy config from .conf to .toml: {}", command.config_path.display());
+        println!(
+            "Migrated legacy config from .conf to .toml: {}",
+            command.config_path.display()
+        );
     }
 
     let app_support = app_support_dir()?;
@@ -239,11 +242,16 @@ pub fn run_init(command: &InitConfig) -> Result<(), String> {
     );
     println!(
         "  {}config{}        {}",
-        c.dim, c.reset, command.config_path.display()
+        c.dim,
+        c.reset,
+        command.config_path.display()
     );
     println!();
     if existing_auth_token.is_some() {
-        println!("  {}auth_token{}    {}{}[unchanged]", c.dim, c.reset, c.dim, c.reset);
+        println!(
+            "  {}auth_token{}    {}{}[unchanged]",
+            c.dim, c.reset, c.dim, c.reset
+        );
     } else {
         println!(
             "  {}Save this token. It will not be displayed again.{}",
@@ -258,7 +266,9 @@ pub fn run_init(command: &InitConfig) -> Result<(), String> {
     println!();
     println!(
         "  {}smoke{}         shortcut-forge smoke --config \"{}\"",
-        c.dim, c.reset, command.config_path.display()
+        c.dim,
+        c.reset,
+        command.config_path.display()
     );
     Ok(())
 }
@@ -287,7 +297,7 @@ pub fn run_doctor(command: &DoctorConfig) -> Result<bool, String> {
             .then_some("Re-run the binary from a local path.".to_string()),
     });
 
-    let config_map = if command.config_path.exists() {
+    let config_map = if config_path_exists(&command.config_path) {
         match load_config_map_from_path(&command.config_path) {
             Ok(config_map) => {
                 checks.push(DoctorCheck {
@@ -519,9 +529,7 @@ pub fn run_restart(command: &OperatorCommand) -> Result<(), String> {
 pub fn run_status(command: &StatusConfig) -> Result<(), String> {
     let launch_agent_path = default_launch_agent_path()?;
     let launch_status = launch_agent_status()?;
-    let file_config = command
-        .config_path
-        .exists()
+    let file_config = config_path_exists(&command.config_path)
         .then(|| load_config_map_from_path(&command.config_path))
         .transpose()?;
     let config = file_config
@@ -574,7 +582,7 @@ pub fn run_status(command: &StatusConfig) -> Result<(), String> {
         );
         println!(
             r#"{{"installed":{},"launch_agent":"{}","loaded":{},"running":{},"pid":{},"state":"{}","config_path":"{}","configured_url":{},"storage":{},"health":{},"stderr_tail":[{}]}}"#,
-            if command.config_path.exists() || launch_agent_path.exists() {
+            if config_path_exists(&command.config_path) || launch_agent_path.exists() {
                 "true"
             } else {
                 "false"
@@ -614,7 +622,7 @@ pub fn run_status(command: &StatusConfig) -> Result<(), String> {
 
     println!(
         "state = {}",
-        if !command.config_path.exists() && !launch_agent_path.exists() {
+        if !config_path_exists(&command.config_path) && !launch_agent_path.exists() {
             "not-installed"
         } else if launch_status.running {
             "running"
@@ -695,35 +703,31 @@ pub fn run_config_show(command: &ConfigShowCommand) -> Result<(), String> {
 }
 
 pub fn run_config_set(command: &ConfigSetCommand) -> Result<(), String> {
-    if !is_supported_config_set_key(&command.key) {
+    let key = normalize_config_key(&command.key);
+    if !is_supported_config_set_key(&key) {
         return Err(format!("unsupported config key: {}", command.key));
     }
-    validate_config_assignment(&command.key, &command.value)?;
-    update_config_file_value(&command.config_path, &command.key, &command.value)?;
-    println!(
-        "Updated {} in {}",
-        command.key,
-        command.config_path.display()
-    );
-    if should_restart_for_config_key(&command.key) {
+    validate_config_assignment(&key, &command.value)?;
+    let config_path = resolve_config_path(&command.config_path)?;
+    update_config_file_value(&config_path, &key, &command.value)?;
+    println!("Updated {} in {}", key, config_path.display());
+    if should_restart_for_config_key(&key) {
         println!("Run `shortcut-forge restart` to apply this change.");
     }
     Ok(())
 }
 
 pub fn run_token_rotate(command: &TokenRotateCommand) -> Result<(), String> {
-    if !command.config_path.exists() {
+    if !config_path_exists(&command.config_path) {
         return Err(format!(
             "config file not found: {}; run `shortcut-forge init` first",
             command.config_path.display()
         ));
     }
     let token = generate_service_auth_token().map_err(|err| err.to_string())?;
-    update_config_file_value(&command.config_path, "auth-token", &token)?;
-    println!(
-        "Rotated service auth token in {}",
-        command.config_path.display()
-    );
+    let config_path = resolve_config_path(&command.config_path)?;
+    update_config_file_value(&config_path, "auth-token", &token)?;
+    println!("Rotated service auth token in {}", config_path.display());
     if command.print {
         println!("auth_token = {token}");
     } else {
@@ -1013,8 +1017,8 @@ pub fn api_message_from_json(body: &str) -> Option<String> {
 }
 
 pub fn parse_build_api_response(body: &str) -> Result<BuildApiResult, String> {
-    let value: serde_json::Value = serde_json::from_str(body)
-        .map_err(|err| format!("invalid build response: {err}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(body).map_err(|err| format!("invalid build response: {err}"))?;
     let object = value
         .as_object()
         .ok_or_else(|| "build response must be a JSON object".to_string())?;
@@ -1067,8 +1071,9 @@ pub fn ensure_writable_dir(path: &Path) -> Result<(), String> {
 pub fn update_config_file_value(path: &Path, key: &str, value: &str) -> Result<(), String> {
     let text = fs::read_to_string(path)
         .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
-    let file_key = config_key_for_file(key);
-    let replacement = format!("{file_key} = {}", format_config_value_for_key(key, value));
+    let key = normalize_config_key(key);
+    let file_key = config_key_for_file(&key);
+    let replacement = format!("{file_key} = {}", format_config_value_for_key(&key, value));
     let mut out = Vec::new();
     let mut found = false;
     for raw_line in text.lines() {
@@ -1112,7 +1117,8 @@ pub fn atomic_write_restricted_file(path: &Path, bytes: &[u8], mode: u32) -> Res
     fs::set_permissions(&tmp, fs::Permissions::from_mode(mode))
         .map_err(|err| format!("failed to chmod {}: {err}", tmp.display()))?;
     fs::rename(&tmp, path).map_err(|err| format!("failed to write {}: {err}", path.display()))?;
-    crate::store::sync_parent_dir(path).map_err(|err| format!("failed to sync {}: {err}", path.display()))?;
+    crate::store::sync_parent_dir(path)
+        .map_err(|err| format!("failed to sync {}: {err}", path.display()))?;
     Ok(())
 }
 
@@ -1198,7 +1204,12 @@ pub fn run_launchctl_command(args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-pub fn render_launch_agent_plist(binary_path: &Path, config_path: &Path, working_dir: &Path, log_dir: &Path) -> String {
+pub fn render_launch_agent_plist(
+    binary_path: &Path,
+    config_path: &Path,
+    working_dir: &Path,
+    log_dir: &Path,
+) -> String {
     let stdout_path = log_dir.join("stdout.log");
     let stderr_path = log_dir.join("stderr.log");
     format!(
@@ -1249,9 +1260,6 @@ pub fn generate_service_auth_token() -> io::Result<String> {
 // Private helpers to preserve original flat-config-file business logic.
 
 fn load_config_map_from_path(path: &Path) -> Result<HashMap<String, String>, String> {
-    if !path.exists() {
-        return Err(format!("config file not found: {}", path.display()));
-    }
     crate::config::load_config_file(path)
         .map_err(|err| format!("failed to load config {}: {err}", path.display()))
 }
@@ -1277,14 +1285,6 @@ fn strip_config_comment(line: &str) -> &str {
         }
     }
     line
-}
-
-fn normalize_config_key(key: &str) -> String {
-    key.trim().replace('_', "-")
-}
-
-fn config_key_for_file(key: &str) -> String {
-    key.replace('-', "_")
 }
 
 fn json_required_string(

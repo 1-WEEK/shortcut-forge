@@ -1,6 +1,6 @@
 # Refactor Plan
 
-Status: completed  
+Status: completed
 Scope: migrate from P0 zero-dependency single-file implementation to a modular, crate-based async Rust service. Business logic stays; infrastructure and runtime model change.
 
 ## Current Pain Points
@@ -62,7 +62,7 @@ Module boundaries:
 - `src/main.rs` — entry point and module declarations only.
 - `src/json.rs` — **deleted**; all JSON replaced by `serde_json`.
 
-Config format breaking change: old flat `key = value` (unquoted strings) is no longer supported. TOML requires quoted strings:
+Config format change: TOML is the canonical format and legacy flat `.conf` files are migrated when loaded. TOML requires quoted strings:
 
 ```toml
 host = "127.0.0.1"

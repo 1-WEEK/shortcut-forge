@@ -1,6 +1,6 @@
-use std::io;
-use axum::response::{IntoResponse, Response};
 use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use std::io;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -115,7 +115,11 @@ impl ApiError {
     }
 
     pub fn tool_unavailable() -> Self {
-        Self::new("TOOL_UNAVAILABLE", 503, "required external tool is unavailable")
+        Self::new(
+            "TOOL_UNAVAILABLE",
+            503,
+            "required external tool is unavailable",
+        )
     }
 
     pub fn server_busy() -> Self {

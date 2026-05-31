@@ -106,9 +106,7 @@ impl BuildMetadata {
     pub fn to_api_json(&self, now: i64) -> String {
         let error = self.error.as_ref().map_or_else(
             || "null".to_string(),
-            |error| {
-                serde_json::to_string(error).unwrap_or_else(|_| "null".to_string())
-            },
+            |error| serde_json::to_string(error).unwrap_or_else(|_| "null".to_string()),
         );
         format!(
             r#"{{"id":"{}","name":"{}","source_format":"{}","source_hash":"{}","sign_mode":"{}","status":"{}","download_url":null,"download_token_count":{},"toolchain":{{"cherri":"{}","shortcuts_sign":"{}","fingerprint":"{}"}},"created_at":"{}","updated_at":"{}","expires_at":"{}","error":{}}}"#,
@@ -144,9 +142,7 @@ impl BuildMetadata {
             .join(",");
         let error = self.error.as_ref().map_or_else(
             || "null".to_string(),
-            |error| {
-                serde_json::to_string(error).unwrap_or_else(|_| "null".to_string())
-            },
+            |error| serde_json::to_string(error).unwrap_or_else(|_| "null".to_string()),
         );
         format!(
             r#"{{
@@ -186,8 +182,8 @@ impl BuildMetadata {
     }
 
     pub fn from_json(bytes: &[u8]) -> Result<Self, String> {
-        let value: serde_json::Value = serde_json::from_slice(bytes)
-            .map_err(|e| format!("invalid JSON: {e}"))?;
+        let value: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|e| format!("invalid JSON: {e}"))?;
         let object = value
             .as_object()
             .ok_or_else(|| "metadata must be an object".to_string())?;
@@ -424,7 +420,10 @@ pub fn json_escape(value: &str) -> String {
     out
 }
 
-fn json_required_string(object: &serde_json::Map<String, serde_json::Value>, key: &str) -> Result<String, String> {
+fn json_required_string(
+    object: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<String, String> {
     object
         .get(key)
         .and_then(|v| v.as_str())

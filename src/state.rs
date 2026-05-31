@@ -95,7 +95,10 @@ pub async fn get_cached_toolchain(state: &AppState) -> Toolchain {
     toolchain
 }
 
-pub async fn build_or_renew(request: BuildRequest, state: &AppState) -> Result<BuildResponse, ApiError> {
+pub async fn build_or_renew(
+    request: BuildRequest,
+    state: &AppState,
+) -> Result<BuildResponse, ApiError> {
     let fingerprint_input = format!(
         "{}\n{}\n{}",
         request.source_format, request.sign_mode, request.source

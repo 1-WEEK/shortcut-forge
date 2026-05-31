@@ -8,9 +8,7 @@ use tokio::process::Command;
 use crate::config::{probe_command_output, probe_command_success};
 use crate::error::ApiError;
 use crate::model::{BuildRequest, CommandCapture, Config, Toolchain, now_unix};
-use crate::store::{
-    create_private_temp_dir, sha256_hex, write_private_file,
-};
+use crate::store::{create_private_temp_dir, sha256_hex, write_private_file};
 
 pub async fn run_build_pipeline(
     request: &BuildRequest,

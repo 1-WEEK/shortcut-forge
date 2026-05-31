@@ -44,11 +44,12 @@ pub fn default_launch_agent_path() -> Result<PathBuf, String> {
 }
 
 pub fn load_config_file(path: &Path) -> Result<HashMap<String, String>, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let path = resolve_config_path(path)?;
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let table: toml::Table = text.parse().map_err(|e: toml::de::Error| e.to_string())?;
     let mut map = HashMap::new();
     for (key, value) in table {
-        let normalized_key = key.replace('_', "-");
+        let normalized_key = normalize_config_key(&key);
         let str_value = match value {
             toml::Value::String(s) => s,
             toml::Value::Integer(i) => i.to_string(),
@@ -59,6 +60,38 @@ pub fn load_config_file(path: &Path) -> Result<HashMap<String, String>, String> 
         map.insert(normalized_key, str_value);
     }
     Ok(map)
+}
+
+pub fn resolve_config_path(path: &Path) -> Result<PathBuf, String> {
+    let extension = path.extension().and_then(|value| value.to_str());
+    match extension {
+        Some("conf") => {
+            let toml_path = path.with_extension("toml");
+            if toml_path.exists() {
+                return Ok(toml_path);
+            }
+            if path.exists() {
+                migrate_legacy_config(&toml_path)?;
+                return Ok(toml_path);
+            }
+            Ok(path.to_path_buf())
+        }
+        _ => {
+            if !path.exists() && extension == Some("toml") {
+                migrate_legacy_config(path)?;
+            }
+            Ok(path.to_path_buf())
+        }
+    }
+}
+
+pub fn config_path_exists(path: &Path) -> bool {
+    path.exists()
+        || match path.extension().and_then(|value| value.to_str()) {
+            Some("toml") => path.with_extension("conf").exists(),
+            Some("conf") => path.with_extension("toml").exists(),
+            _ => false,
+        }
 }
 
 /// Migrate a legacy `.conf` flat key=value file to TOML `.toml`.
@@ -103,7 +136,7 @@ pub fn migrate_legacy_config(toml_path: &Path) -> Result<bool, String> {
         }
         let stripped = strip_line_comment(trimmed);
         if let Some((key, value)) = stripped.split_once('=') {
-            let key = key.trim();
+            let key = config_key_for_file(key.trim());
             let value = value.trim();
             let new_value = if value.starts_with('"') && value.ends_with('"') {
                 value.to_string()
@@ -120,15 +153,31 @@ pub fn migrate_legacy_config(toml_path: &Path) -> Result<bool, String> {
             migrated.push('\n');
         }
     }
-    std::fs::write(toml_path, migrated)
-        .map_err(|e| format!("failed to write migrated config {}: {e}", toml_path.display()))?;
+    std::fs::write(toml_path, migrated).map_err(|e| {
+        format!(
+            "failed to write migrated config {}: {e}",
+            toml_path.display()
+        )
+    })?;
     #[cfg(unix)]
     {
         let perms = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(toml_path, perms)
-            .map_err(|e| format!("failed to chmod migrated config {}: {e}", toml_path.display()))?;
+        std::fs::set_permissions(toml_path, perms).map_err(|e| {
+            format!(
+                "failed to chmod migrated config {}: {e}",
+                toml_path.display()
+            )
+        })?;
     }
     Ok(true)
+}
+
+pub fn normalize_config_key(key: &str) -> String {
+    key.trim().replace('_', "-")
+}
+
+pub fn config_key_for_file(key: &str) -> String {
+    normalize_config_key(key).replace('-', "_")
 }
 
 pub fn config_value(
@@ -573,10 +622,15 @@ pub fn launchctl_service_target() -> Result<String, String> {
 }
 
 pub fn operator_config_path(explicit: Option<String>, default: PathBuf) -> Result<PathBuf, String> {
-    Ok(explicit
+    let path = explicit
         .map(PathBuf::from)
         .or_else(|| env::var("SHORTCUT_SERVER_CONFIG").ok().map(PathBuf::from))
-        .unwrap_or(default))
+        .unwrap_or(default);
+    if path.extension().and_then(|value| value.to_str()) == Some("conf") {
+        Ok(path.with_extension("toml"))
+    } else {
+        Ok(path)
+    }
 }
 
 pub fn redacted_effective_config(config: &Config, expired_before: Option<&str>) -> String {
@@ -621,8 +675,9 @@ pub fn redacted_effective_config(config: &Config, expired_before: Option<&str>) 
 }
 
 pub fn format_config_value_for_key(key: &str, value: &str) -> String {
+    let key = normalize_config_key(key);
     if matches!(
-        key,
+        key.as_str(),
         "port"
             | "max-source-bytes"
             | "build-timeout-seconds"
@@ -636,7 +691,8 @@ pub fn format_config_value_for_key(key: &str, value: &str) -> String {
 }
 
 pub fn validate_config_assignment(key: &str, value: &str) -> Result<(), String> {
-    match key {
+    let key = normalize_config_key(key);
+    match key.as_str() {
         "host" | "storage" | "cherri-bin" | "shortcuts-bin" => {
             if value.trim().is_empty() {
                 return Err(format!("{key} must not be empty"));
@@ -694,8 +750,9 @@ pub fn validate_config_assignment(key: &str, value: &str) -> Result<(), String> 
 }
 
 pub fn is_supported_config_set_key(key: &str) -> bool {
+    let key = normalize_config_key(key);
     matches!(
-        key,
+        key.as_str(),
         "host"
             | "port"
             | "public-base-url"
@@ -711,7 +768,7 @@ pub fn is_supported_config_set_key(key: &str) -> bool {
 }
 
 pub fn should_restart_for_config_key(key: &str) -> bool {
-    key != "expired-before"
+    normalize_config_key(key) != "expired-before"
 }
 
 pub fn render_operator_config(config: &Config, expired_before: &str) -> String {

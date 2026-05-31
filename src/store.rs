@@ -5,9 +5,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use crate::model::{
-    BuildMetadata, BuildStatus, DownloadTokenRecord, GcConfig, ResolvedDownload,
-};
+use crate::model::{BuildMetadata, BuildStatus, DownloadTokenRecord, GcConfig, ResolvedDownload};
 
 pub fn build_dir(storage: &Path, id: &str) -> PathBuf {
     storage.join("builds").join(&id[..2]).join(id)
@@ -182,7 +180,7 @@ pub(crate) fn set_private_dir(path: &Path) -> io::Result<()> {
 }
 
 pub fn sha256_hex(input: &[u8]) -> String {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let hash = Sha256::digest(input);
     hash.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -251,7 +249,8 @@ pub fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 pub fn run_gc(config: &GcConfig) -> io::Result<()> {
-    let threshold = crate::model::now_unix().saturating_sub(config.expired_before_age.as_secs() as i64);
+    let threshold =
+        crate::model::now_unix().saturating_sub(config.expired_before_age.as_secs() as i64);
     let metadata = scan_metadata(&config.storage)?;
     let mut removed = 0usize;
     for build in metadata {

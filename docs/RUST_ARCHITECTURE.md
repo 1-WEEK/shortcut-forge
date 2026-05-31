@@ -278,7 +278,8 @@ stages) map to a single module rather than re-expanding the monolith.
 
 ## Migration Notes
 
-- Config files migrated from flat `key = value` to TOML. String values now require quotes.
+- Config files migrated from flat `key = value` to TOML. Legacy `.conf` files are migrated on load
+  when the sibling `.toml` file does not exist. TOML string values require quotes.
 - The blocking `TcpListener` loop was replaced by `tokio` + `axum`.
 - Shared mutable state (`build_lock_table`, concurrency slot counter) uses `tokio::sync::Mutex`
   and `tokio::sync::Semaphore` because handlers hold them across await points.
