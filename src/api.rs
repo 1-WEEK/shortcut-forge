@@ -10,7 +10,7 @@ use crate::model::{
     BuildRequest, DEFAULT_TTL_SECONDS, MAX_TTL_SECONDS, MIN_TTL_SECONDS, VERSION, format_rfc3339,
     json_escape, now_unix,
 };
-use crate::state::{AppState, build_or_renew, get_cached_toolchain};
+use crate::state::{AppState, get_cached_toolchain};
 use crate::store::{
     constant_time_eq, is_valid_build_id, is_valid_download_token, load_metadata, resolve_download,
     safe_filename, sha256_hex,
@@ -58,7 +58,7 @@ pub async fn build_handler(State(state): State<Arc<AppState>>, body: Bytes) -> R
         Ok(request) => request,
         Err(err) => return err.into_response(),
     };
-    match build_or_renew(request, &state).await {
+    match state.builds.submit(request).await {
         Ok(response) => {
             let body = format!(
                 r#"{{"id":"{}","download_url":"{}","expires_at":"{}"}}"#,

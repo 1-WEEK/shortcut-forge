@@ -1,5 +1,6 @@
 mod api;
 mod build;
+mod build_lifecycle;
 mod cli;
 mod config;
 mod error;
@@ -311,7 +312,7 @@ mod tests {
     use std::fs;
     use std::io;
     use std::path::{Path, PathBuf};
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     #[cfg(unix)]
@@ -319,6 +320,7 @@ mod tests {
 
     use crate::api::parse_build_request;
     use crate::build::run_build_pipeline;
+    use crate::build_lifecycle::BuildLifecycle;
     use crate::cli::{ConfigCmd, ConfigSetArgs};
     use crate::config::{
         authority_has_port, build_runtime_config_from_file, config_path_exists,
@@ -330,7 +332,7 @@ mod tests {
         DownloadTokenRecord, GcConfig, Toolchain, format_rfc3339, now_unix, parse_rfc3339,
     };
     use crate::operator::update_config_file_value;
-    use crate::state::{AppState, BuildSlot, StorageLock, build_or_renew};
+    use crate::state::{AppState, StorageLock};
     use crate::store::{
         artifact_path, base64url_no_pad, build_dir, is_valid_build_id, is_valid_download_token,
         load_metadata, metadata_path, random_bytes, resolve_download, run_gc, save_metadata,
@@ -727,22 +729,22 @@ printf 'signed shortcut bytes' > "$out"
 "#,
         );
 
+        let config = Config {
+            host: "127.0.0.1".to_string(),
+            port: 8787,
+            public_base_url: "http://127.0.0.1:8787".to_string(),
+            storage: storage.clone(),
+            max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
+            build_timeout: Duration::from_secs(5),
+            max_build_concurrency: 1,
+            auth_token: "test-token".to_string(),
+            health_cache_ttl: Duration::from_secs(60),
+            cherri_bin: cherri.to_string_lossy().to_string(),
+            shortcuts_bin: shortcuts.to_string_lossy().to_string(),
+        };
         let state = AppState {
-            config: Config {
-                host: "127.0.0.1".to_string(),
-                port: 8787,
-                public_base_url: "http://127.0.0.1:8787".to_string(),
-                storage: storage.clone(),
-                max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
-                build_timeout: Duration::from_secs(5),
-                max_build_concurrency: 1,
-                auth_token: "test-token".to_string(),
-                health_cache_ttl: Duration::from_secs(60),
-                cherri_bin: cherri.to_string_lossy().to_string(),
-                shortcuts_bin: shortcuts.to_string_lossy().to_string(),
-            },
-            build_locks: tokio::sync::Mutex::new(HashMap::new()),
-            build_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+            config: config.clone(),
+            builds: BuildLifecycle::new(config),
             health_cache: tokio::sync::Mutex::new(None),
             _storage_lock: StorageLock::acquire(&storage).unwrap(),
         };
@@ -754,7 +756,7 @@ printf 'signed shortcut bytes' > "$out"
             sign_mode: "anyone".to_string(),
             ttl_seconds: 120,
         };
-        let first = build_or_renew(request, &state).await.unwrap();
+        let first = state.builds.submit(request).await.unwrap();
         let first_token = first.download_url.rsplit('/').next().unwrap().to_string();
         let first_metadata = load_metadata(&storage, &first.id).unwrap().unwrap();
         assert_eq!(first.id.len(), crate::model::BUILD_ID_LEN);
@@ -771,7 +773,7 @@ printf 'signed shortcut bytes' > "$out"
             sign_mode: "anyone".to_string(),
             ttl_seconds: 240,
         };
-        let second = build_or_renew(request, &state).await.unwrap();
+        let second = state.builds.submit(request).await.unwrap();
         let second_token = second.download_url.rsplit('/').next().unwrap().to_string();
         assert_eq!(first.id, second.id);
         assert_ne!(first.download_url, second.download_url);
@@ -812,18 +814,17 @@ printf 'signed shortcut bytes' > "$out"
         let state = make_test_state(&storage, &cherri, &shortcuts);
         let source = "#define name Minimal\nshowNotification(\"ok\", \"x\")\n".to_string();
 
-        let first = build_or_renew(
-            BuildRequest {
+        let first = state
+            .builds
+            .submit(BuildRequest {
                 name: "Minimal".to_string(),
                 source_format: "cherri".to_string(),
                 source: source.clone(),
                 sign_mode: "anyone".to_string(),
                 ttl_seconds: 120,
-            },
-            &state,
-        )
-        .await
-        .unwrap();
+            })
+            .await
+            .unwrap();
         let first_token = first.download_url.rsplit('/').next().unwrap().to_string();
         let mut metadata = load_metadata(&storage, &first.id).unwrap().unwrap();
         metadata.expires_at = now_unix() - 1;
@@ -840,18 +841,17 @@ printf 'signed shortcut bytes' > "$out"
                 .is_none()
         );
 
-        let renewed = build_or_renew(
-            BuildRequest {
+        let renewed = state
+            .builds
+            .submit(BuildRequest {
                 name: "Minimal Renewed".to_string(),
                 source_format: "cherri".to_string(),
                 source,
                 sign_mode: "anyone".to_string(),
                 ttl_seconds: 240,
-            },
-            &state,
-        )
-        .await
-        .unwrap();
+            })
+            .await
+            .unwrap();
         let renewed_token = renewed.download_url.rsplit('/').next().unwrap().to_string();
         assert_eq!(first.id, renewed.id);
         assert_ne!(first.download_url, renewed.download_url);
@@ -876,18 +876,17 @@ printf 'signed shortcut bytes' > "$out"
         let state = make_test_state(&storage, &cherri, &shortcuts);
         let source = "#define name Minimal\nshowNotification(\"ok\", \"x\")\n".to_string();
 
-        let first = build_or_renew(
-            BuildRequest {
+        let first = state
+            .builds
+            .submit(BuildRequest {
                 name: "Minimal".to_string(),
                 source_format: "cherri".to_string(),
                 source: source.clone(),
                 sign_mode: "anyone".to_string(),
                 ttl_seconds: 120,
-            },
-            &state,
-        )
-        .await
-        .unwrap();
+            })
+            .await
+            .unwrap();
         let first_metadata = load_metadata(&storage, &first.id).unwrap().unwrap();
         assert_eq!(
             fs::read_to_string(artifact_path(&storage, &first.id)).unwrap(),
@@ -895,18 +894,17 @@ printf 'signed shortcut bytes' > "$out"
         );
 
         install_fake_tools(&root, "Cherri Compiler v2.4.0", "signed v2");
-        let second = build_or_renew(
-            BuildRequest {
+        let second = state
+            .builds
+            .submit(BuildRequest {
                 name: "Minimal".to_string(),
                 source_format: "cherri".to_string(),
                 source,
                 sign_mode: "anyone".to_string(),
                 ttl_seconds: 240,
-            },
-            &state,
-        )
-        .await
-        .unwrap();
+            })
+            .await
+            .unwrap();
         let second_metadata = load_metadata(&storage, &second.id).unwrap().unwrap();
         assert_eq!(first.id, second.id);
         assert_ne!(
@@ -929,18 +927,17 @@ printf 'signed shortcut bytes' > "$out"
         let (cherri, shortcuts) = install_fake_tools(&root, "Cherri Compiler v2.3.0", "signed v1");
         {
             let state = make_test_state(&storage, &cherri, &shortcuts);
-            let built = build_or_renew(
-                BuildRequest {
+            let built = state
+                .builds
+                .submit(BuildRequest {
                     name: "Minimal".to_string(),
                     source_format: "cherri".to_string(),
                     source: "#define name Minimal\nshowNotification(\"ok\", \"x\")\n".to_string(),
                     sign_mode: "anyone".to_string(),
                     ttl_seconds: 120,
-                },
-                &state,
-            )
-            .await
-            .unwrap();
+                })
+                .await
+                .unwrap();
             let mut metadata = load_metadata(&storage, &built.id).unwrap().unwrap();
             metadata.expires_at = now_unix() - 10;
             save_metadata(&storage, &metadata).unwrap();
@@ -960,21 +957,106 @@ printf 'signed shortcut bytes' > "$out"
     #[tokio::test]
     async fn build_slot_saturation_returns_server_busy() {
         let root = test_temp_dir("shortcut-forge-server-busy");
+        let tools = root.join("tools");
         let storage = root.join("data");
+        fs::create_dir_all(&tools).unwrap();
         fs::create_dir_all(&storage).unwrap();
-        let (cherri, shortcuts) = install_fake_tools(&root, "Cherri Compiler v2.3.0", "signed v1");
-        let state = make_test_state(&storage, &cherri, &shortcuts);
+        let cherri = tools.join("fake-cherri");
+        let shortcuts = tools.join("fake-shortcuts");
+        let marker = root.join("build-started");
+        write_executable(
+            &cherri,
+            &format!(
+                r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "Cherri Compiler v2.3.0"
+  exit 0
+fi
+printf started > "{}"
+sleep 1
+out=""
+for arg in "$@"; do
+  case "$arg" in
+    --output=*) out="${{arg#--output=}}" ;;
+  esac
+done
+if [ -z "$out" ]; then
+  exit 2
+fi
+printf 'unsigned shortcut' > "$out"
+"#,
+                marker.display()
+            ),
+        );
+        write_executable(
+            &shortcuts,
+            r#"#!/bin/sh
+if [ "$1" = "help" ] && [ "$2" = "sign" ]; then
+  echo "sign help"
+  exit 0
+fi
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    out="$1"
+  fi
+  shift
+done
+if [ -z "$out" ]; then
+  exit 2
+fi
+printf 'signed shortcut bytes' > "$out"
+"#,
+        );
 
-        let first = BuildSlot::try_acquire(&state).unwrap();
-        match BuildSlot::try_acquire(&state) {
-            Ok(_) => panic!("second build slot should not be acquired"),
-            Err(err) => {
-                assert_eq!(err.code, "SERVER_BUSY");
-                assert_eq!(err.status, 503);
+        let lifecycle = Arc::new(BuildLifecycle::new(Config {
+            host: "127.0.0.1".to_string(),
+            port: 8787,
+            public_base_url: "http://127.0.0.1:8787".to_string(),
+            storage: storage.clone(),
+            max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
+            build_timeout: Duration::from_secs(5),
+            max_build_concurrency: 1,
+            auth_token: "test-token".to_string(),
+            health_cache_ttl: Duration::from_secs(60),
+            cherri_bin: cherri.to_string_lossy().to_string(),
+            shortcuts_bin: shortcuts.to_string_lossy().to_string(),
+        }));
+
+        let first_lifecycle = Arc::clone(&lifecycle);
+        let first = tokio::spawn(async move {
+            first_lifecycle
+                .submit(BuildRequest {
+                    name: "First".to_string(),
+                    source_format: "cherri".to_string(),
+                    source: "#define name First\nshowNotification(\"ok\", \"1\")\n".to_string(),
+                    sign_mode: "anyone".to_string(),
+                    ttl_seconds: 120,
+                })
+                .await
+        });
+        for _ in 0..50 {
+            if marker.exists() {
+                break;
             }
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        drop(first);
-        assert!(BuildSlot::try_acquire(&state).is_ok());
+        assert!(marker.exists(), "first build did not start");
+
+        let err = lifecycle
+            .submit(BuildRequest {
+                name: "Second".to_string(),
+                source_format: "cherri".to_string(),
+                source: "#define name Second\nshowNotification(\"ok\", \"2\")\n".to_string(),
+                sign_mode: "anyone".to_string(),
+                ttl_seconds: 120,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "SERVER_BUSY");
+        assert_eq!(err.status, 503);
+        assert!(first.await.unwrap().is_ok());
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -1098,22 +1180,22 @@ printf '{signed_text}' > "$out"
     }
 
     fn make_test_state(storage: &Path, cherri: &Path, shortcuts: &Path) -> AppState {
+        let config = Config {
+            host: "127.0.0.1".to_string(),
+            port: 8787,
+            public_base_url: "http://127.0.0.1:8787".to_string(),
+            storage: storage.to_path_buf(),
+            max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
+            build_timeout: Duration::from_secs(5),
+            max_build_concurrency: 1,
+            auth_token: "test-token".to_string(),
+            health_cache_ttl: Duration::from_secs(60),
+            cherri_bin: cherri.to_string_lossy().to_string(),
+            shortcuts_bin: shortcuts.to_string_lossy().to_string(),
+        };
         AppState {
-            config: Config {
-                host: "127.0.0.1".to_string(),
-                port: 8787,
-                public_base_url: "http://127.0.0.1:8787".to_string(),
-                storage: storage.to_path_buf(),
-                max_source_bytes: DEFAULT_MAX_SOURCE_BYTES,
-                build_timeout: Duration::from_secs(5),
-                max_build_concurrency: 1,
-                auth_token: "test-token".to_string(),
-                health_cache_ttl: Duration::from_secs(60),
-                cherri_bin: cherri.to_string_lossy().to_string(),
-                shortcuts_bin: shortcuts.to_string_lossy().to_string(),
-            },
-            build_locks: tokio::sync::Mutex::new(HashMap::new()),
-            build_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+            config: config.clone(),
+            builds: BuildLifecycle::new(config),
             health_cache: tokio::sync::Mutex::new(None),
             _storage_lock: StorageLock::acquire(storage).unwrap(),
         }

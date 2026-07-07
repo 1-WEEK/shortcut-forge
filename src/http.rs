@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 
@@ -13,6 +12,7 @@ use axum::{
 use tokio::net::TcpListener;
 
 use crate::api;
+use crate::build_lifecycle::BuildLifecycle;
 use crate::error::ApiError;
 use crate::model::Config;
 use crate::state::{AppState, StorageLock};
@@ -23,8 +23,7 @@ pub async fn serve(config: Config) -> std::io::Result<()> {
     let storage_lock = StorageLock::acquire(&config.storage)?;
     let state = Arc::new(AppState {
         config: config.clone(),
-        build_locks: tokio::sync::Mutex::new(HashMap::new()),
-        build_slots: Arc::new(tokio::sync::Semaphore::new(config.max_build_concurrency)),
+        builds: BuildLifecycle::new(config.clone()),
         health_cache: tokio::sync::Mutex::new(None),
         _storage_lock: storage_lock,
     });
