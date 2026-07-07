@@ -103,10 +103,13 @@ src/api.rs
   async route handlers: health, build, metadata, download
 
 src/state.rs
-  AppState: Config, build-slot Semaphore, build-lock table
+  AppState: Config, BuildLifecycle, health cache, storage lock
+
+src/build_lifecycle.rs
+  POST build submission lifecycle: identity, locks, rebuild/renew decisions, tokens, metadata
 
 src/build.rs
-  temp-dir creation, Cherri invocation, shortcuts sign, metadata write
+  temp-dir creation, Cherri invocation, shortcuts sign, signed output retention
 
 src/store.rs
   scan_metadata, run_gc, token hashing, storage layout
@@ -132,6 +135,25 @@ stores the full `source_hash`; if a truncated ID collision is detected, the serv
 Repeated same-source `POST /api/builds` requests reuse the same ID. If the artifact exists and the
 toolchain fingerprint is unchanged, the server refreshes mutable metadata and returns a new
 download URL without recompiling.
+
+## Build Lifecycle
+
+`src/build_lifecycle.rs` owns the command-side lifecycle for `POST /api/builds` after HTTP auth and
+body validation. Its external interface accepts a validated `BuildRequest` and returns a
+`BuildResponse` or `ApiError`.
+
+The lifecycle module owns:
+
+- deterministic build identity and truncated-ID collision checks
+- per-build locking and global build-slot saturation behavior
+- rebuild versus renewal decisions
+- toolchain fingerprint freshness checks
+- invoking the compile-and-sign pipeline when a rebuild is needed
+- persisting signed artifacts and metadata
+- pruning and issuing hashed download tokens
+
+Read-side metadata lookup and `/s/<download_token>` resolution stay in `api.rs`/`store.rs`; they do
+not issue new plaintext download tokens and are not part of the build lifecycle module.
 
 ## Storage
 
@@ -181,16 +203,15 @@ iPhone import flow opens that URL directly.
 
 ## Build Pipeline
 
-For each rebuild:
+For each rebuild, `src/build.rs` performs the compile-and-sign work:
 
 1. Create a private temp directory under the storage root.
 2. Write `source.cherri` with owner-only permissions where supported.
 3. Run `cherri <source-file> --skip-sign --output=<unsigned-shortcut> --no-ansi`.
 4. Discover the unsigned `.shortcut` if Cherri writes a version-specific output name.
 5. Run `shortcuts sign --mode anyone --input <unsigned> --output <signed>`.
-6. Copy the signed artifact into the build directory.
-7. Atomically write metadata.
-8. Remove temp source and temp build files.
+6. Retain the signed output long enough for the lifecycle module to persist it.
+7. Remove temp source and temp build files.
 
 Commands are invoked with structured argument arrays. The implementation never shells out through
 `sh -c`.
@@ -223,9 +244,10 @@ The service does not expose `DELETE /api/builds/<id>` or any destructive cleanup
 
 The service uses:
 
-- A per-build in-memory lock table (`tokio::sync::Mutex<HashMap<...>>`) to prevent identical
-  builds from writing the same output at the same time.
-- A global build-slot `tokio::sync::Semaphore` controlled by `max_build_concurrency`.
+- A per-build in-memory lock table inside `BuildLifecycle` to prevent identical builds from writing
+  the same output at the same time.
+- A global build-slot `tokio::sync::Semaphore` inside `BuildLifecycle` controlled by
+  `max_build_concurrency`.
 - An exclusive storage lock at `<storage>/.lock` to prevent two server processes from serving the
   same storage root.
 
@@ -269,6 +291,8 @@ responsibility split already present in the code:
 
 - `cli.rs` / `config.rs` — operator-facing surface (argument parsing and configuration).
 - `http.rs` / `api.rs` — request transport and route handling.
+- `state.rs` — app-wide shared state for HTTP handlers.
+- `build_lifecycle.rs` — the POST build command lifecycle.
 - `build.rs` — the compile-and-sign pipeline.
 - `store.rs` — persistence, GC, and token resolution.
 - `operator.rs` — macOS service lifecycle.
@@ -281,7 +305,7 @@ stages) map to a single module rather than re-expanding the monolith.
 - Config files migrated from flat `key = value` to TOML. Legacy `.conf` files are migrated on load
   when the sibling `.toml` file does not exist. TOML string values require quotes.
 - The blocking `TcpListener` loop was replaced by `tokio` + `axum`.
-- Shared mutable state (`build_lock_table`, concurrency slot counter) uses `tokio::sync::Mutex`
-  and `tokio::sync::Semaphore` because handlers hold them across await points.
+- Build lifecycle state (per-build locks and the concurrency slot counter) uses `tokio::sync::Mutex`
+  and `tokio::sync::Semaphore` because submissions hold them across await points.
 - Process spawning (`cherri`, `shortcuts sign`) uses `tokio::process::Command` to avoid blocking
   the async runtime worker threads.
