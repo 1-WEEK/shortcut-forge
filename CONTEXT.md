@@ -21,6 +21,11 @@ The command-side workflow for accepting a build request, deciding whether it is 
 running the build pipeline when needed, and updating artifact metadata and download tokens.
 _Avoid_: Build route, state handler
 
+**Build Lifecycle Decision**:
+The outcome of evaluating a Build Request against existing build state and the current Toolchain
+Fingerprint to decide whether submission proceeds as a Renewal or a Rebuild.
+_Avoid_: Submission plan, branch choice
+
 **Build Pipeline**:
 The compile-and-sign work that turns complete Cherri source into signed shortcut bytes. It does not
 decide build identity, renewal, token issuance, or metadata transitions.

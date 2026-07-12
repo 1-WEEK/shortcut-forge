@@ -145,7 +145,7 @@ body validation. Its external interface accepts a validated `BuildRequest` and r
 The lifecycle module owns:
 
 - deterministic build identity and truncated-ID collision checks
-- per-build locking and global build-slot saturation behavior
+- per-build locking and global build-slot saturation behavior for rebuild work
 - rebuild versus renewal decisions
 - toolchain fingerprint freshness checks
 - invoking the compile-and-sign pipeline when a rebuild is needed
@@ -247,7 +247,8 @@ The service uses:
 - A per-build in-memory lock table inside `BuildLifecycle` to prevent identical builds from writing
   the same output at the same time.
 - A global build-slot `tokio::sync::Semaphore` inside `BuildLifecycle` controlled by
-  `max_build_concurrency`.
+  `max_build_concurrency`. Only rebuilds acquire a build slot; renewals update metadata without
+  consuming compile/sign capacity.
 - An exclusive storage lock at `<storage>/.lock` to prevent two server processes from serving the
   same storage root.
 
