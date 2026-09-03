@@ -138,11 +138,11 @@ pub fn migrate_legacy_config(toml_path: &Path) -> Result<bool, String> {
         if let Some((key, value)) = stripped.split_once('=') {
             let key = config_key_for_file(key.trim());
             let value = value.trim();
-            let new_value = if value.starts_with('"') && value.ends_with('"') {
-                value.to_string()
-            } else if value == "true" || value == "false" {
-                value.to_string()
-            } else if value.parse::<i64>().is_ok() {
+            let new_value = if (value.starts_with('"') && value.ends_with('"'))
+                || value == "true"
+                || value == "false"
+                || value.parse::<i64>().is_ok()
+            {
                 value.to_string()
             } else {
                 format!("\"{}\"", value.replace('"', "\\\""))
@@ -264,7 +264,7 @@ pub fn build_runtime_config(
     file_config: &HashMap<String, String>,
     require_auth: bool,
 ) -> Result<Config, String> {
-    let host = config_value(&flags, file_config, "host", "SHORTCUT_SERVER_HOST")
+    let host = config_value(flags, file_config, "host", "SHORTCUT_SERVER_HOST")
         .unwrap_or_else(|| "127.0.0.1".to_string());
     if host.trim().is_empty() {
         return Err("host must not be empty".to_string());

@@ -1061,6 +1061,8 @@ printf 'signed shortcut bytes' > "$out"
         fs::remove_dir_all(root).unwrap();
     }
 
+    // The process-wide current directory must stay serialized across this async pipeline.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn build_pipeline_handles_relative_storage_paths() {
         let _guard = CURRENT_DIR_LOCK.lock().unwrap();
